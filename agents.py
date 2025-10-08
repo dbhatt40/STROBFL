@@ -21,6 +21,7 @@ from utils.census_utils import census_model_1
 from utils.cifar_utils import cifar10_model
 
 from utils.eval_utils import eval_minimal
+from customSGD import CustomSGD
 
 import global_vars as gv
 
@@ -65,19 +66,9 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
                                             gv.DATA_DIM), dtype=tf.float32)
         # y = tf.placeholder(dtype=tf.float32)
         y = tf.placeholder(dtype=tf.int64)
-    else:
-        x = tf.placeholder(shape=(None,
-                                            gv.IMAGE_ROWS,
-                                            gv.IMAGE_COLS,
-                                            gv.NUM_CHANNELS), dtype=tf.float32)
-        y = tf.placeholder(dtype=tf.int64)
 
-    if 'MNIST' in args.dataset:
-        agent_model = model_mnist(type=args.model_num)
-    elif args.dataset == 'census':
+    if args.dataset == 'census':
         agent_model = census_model_1()
-    elif args.dataset == 'CIFAR-10':
-        agent_model = cifar10_model()
     else:
         return
 
@@ -96,6 +87,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
             learning_rate=lr).minimize(loss)
+    elif args.optimizer == 'strsgd':
+        optimizer = CustomSGD(learning_rate=0.01, momentum=0.0, nesterov=False, weight_decay=1e-4).minimize(loss)
     elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)

@@ -53,9 +53,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	param_dict = dict()
 	param_dict['offset'] = [0]
 	param_dict['shape'] = []
-	if args.gar == 'krum':
-		krum_select_indices = []
-	
+
 	G = [None for i in range(0,args.k)]
 	r = [1 for i in range(0,args.k)]
 	Delta = 0.1
