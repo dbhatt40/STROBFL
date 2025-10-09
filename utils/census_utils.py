@@ -12,7 +12,7 @@ from keras.utils import np_utils
 import global_vars as gv
 
 def data_census():
-	data_dir = '../data/census/'
+	data_dir = '/content/STROBFL/data/census/'
 	traindata = sio.loadmat(data_dir+'CensusTrain.mat')['traindata']
 	
 	testdata = sio.loadmat(data_dir+'CensusTest.mat')['testdata']
