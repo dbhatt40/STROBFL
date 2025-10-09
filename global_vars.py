@@ -96,22 +96,22 @@ def dir_name_fn(args):
 def init():
     # Reading in arguments for the run
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default='MNIST',
+    parser.add_argument("--dataset", default='census',
                         help="dataset to be used")
     parser.add_argument("--model_num", type=int,
                         default=0, help="model to be used")
-    parser.add_argument("--optimizer", default='adam',
+    parser.add_argument("--optimizer", default='sgd',
                         help="optimizer to be used")
     parser.add_argument("--eta", type=float, default=1e-3,
                         help="learning rate")
-    parser.add_argument("--k", type=int, default=10, help="number of agents")
-    parser.add_argument("--C", type=float, default=1.0,
+    parser.add_argument("--k", type=int, default=2, help="number of agents")
+    parser.add_argument("--C", type=float, default=0.5,
                         help="fraction of agents per time step")
-    parser.add_argument("--E", type=int, default=5,
+    parser.add_argument("--E", type=int, default=1,
                         help="epochs for each agent")
-    parser.add_argument("--steps", type=int, default=None,
+    parser.add_argument("--steps", type=int, default=2,
                         help="GD steps per agent")
-    parser.add_argument("--T", type=int, default=80, help="max time_steps")
+    parser.add_argument("--T", type=int, default=2, help="max time_steps")
     parser.add_argument("--B", type=int, default=75, help="agent batch size")
     parser.add_argument("--train", default=True, action='store_true')
     parser.add_argument("--lr_reduce", action='store_true')

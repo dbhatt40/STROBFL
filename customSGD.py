@@ -4,78 +4,50 @@ Created on Wed Oct  8 13:19:29 2025
 
 @author: Divya
 """
-
 import tensorflow as tf
-from tensorflow import keras
 
-class CustomSGD(keras.optimizers.Optimizer):
-    """SGD with optional momentum, Nesterov, and decoupled weight decay."""
-    def __init__(
-        self,
-        learning_rate=0.01,
-        momentum=0.0,
-        nesterov=False,
-        weight_decay=0.0,   # decoupled weight decay (like AdamW-style)
-        name="custom_sgd",		
-        **kwargs,
-    ):
-        super().__init__(name, **kwargs)
-        self._set_hyper("learning_rate", learning_rate)
-        self._set_hyper("weight_decay", weight_decay)
-        self.momentum = float(momentum)
-        self.nesterov = bool(nesterov)
 
-    def build(self, var_list):
-        # Create slot variables (e.g., velocity) for each trainable variable.
-        if self.momentum > 0.0:
-            for var in var_list:
-                self.add_slot(var, "velocity")
+class CustomRuleSGD(tf.compat.v1.train.GradientDescentOptimizer):
+    def __init__(self, learning_rate=0.01, update_rule=None, **kw):
+        super(CustomRuleSGD, self).__init__(learning_rate=learning_rate, **kw)
+        self._update_rule = update_rule
 
-    def update_step(self, grad, var):
-        # Convert IndexedSlices -> dense if needed (simple, robust default)
-        if isinstance(grad, tf.IndexedSlices):
-            grad = tf.convert_to_tensor(grad)
+    def _lr_for(self, var):
+        # Ensure the parent prepared tensors
+        if not hasattr(self, "_learning_rate_tensor") or self._learning_rate_tensor is None:
+            self._prepare()  # creates self._learning_rate_tensor
+        lr_t = self._learning_rate_tensor
+        # Match variable dtype (avoids dtype errors on mixed-precision graphs)
+        return tf.cast(lr_t, var.dtype.base_dtype)
 
-        lr = tf.cast(self._decayed_lr(var.dtype), var.dtype)
-        wd = tf.cast(self._get_hyper("weight_decay", var.dtype), var.dtype)
+    def apply_gradients(self, grads_and_vars, global_step=None, name=None):
+        pairs = [(g, v) for g, v in grads_and_vars if g is not None]
+        if not pairs:
+            return tf.no_op(name or "custom_sgd_noop")
 
-        # Decoupled weight decay: w <- w - lr * wd * w
-        if wd > 0:
-            var.assign_sub(lr * wd * var)
+        update_ops = []
+        for grad, var in pairs:
+            if isinstance(grad, tf.IndexedSlices):
+                grad = tf.convert_to_tensor(grad)  # densify unless you implement sparse path
+            lr_t = self._lr_for(var)
 
-        if self.momentum > 0.0:
-            v = self.get_slot(var, "velocity")
-            # v <- m * v + grad
-            v.assign(self.momentum * v + grad)
-            # Nesterov: grad_hat = grad + m * v
-            update = grad + self.momentum * v if self.nesterov else v
-        else:
-            update = grad
+            # Default delta if no custom rule provided
+            delta = lr_t * grad if self._update_rule is None \
+                    else self._update_rule(grad, var, lr_t, global_step)
 
-        # w <- w - lr * update
-        var.assign_sub(lr * update)
+            update_ops.append(var.assign_sub(delta, use_locking=self._use_locking))
 
-    def get_config(self):
-        base = super().get_config()
-        return {
-            **base,
-            "learning_rate": self._serialize_hyperparameter("learning_rate"),
-            "weight_decay": self._serialize_hyperparameter("weight_decay"),
-            "momentum": self.momentum,
-            "nesterov": self.nesterov,
-        }
+        train_op = tf.group(*update_ops, name=(name or "custom_sgd_apply"))
+        if global_step is not None:
+            with tf.control_dependencies([train_op]):
+                return tf.compat.v1.assign_add(global_step, 1)
+        print("Training step")
+        return train_op
 
-# ---- Example usage ----
-# A tiny model to show it working end-to-end.
-# model = keras.Sequential([
-#     keras.layers.Dense(16, activation="relu", input_shape=(10,)),
-#     keras.layers.Dense(1)
-# ])
 
-# opt = CustomSGD(learning_rate=0.01, momentum=0.9, nesterov=True, weight_decay=1e-4)
-# model.compile(optimizer=opt, loss="mse")
+	
+def shrink_rule(grad, var, lr_t, global_step):
+      wd = 1e-4
+      return lr_t * (grad + wd * var)
 
-# import numpy as np
-# x = np.random.randn(128, 10).astype("float32")
-# y = np.random.randn(128, 1).astype("float32")
-# model.fit(x, y, epochs=3, verbose=0)
+# opt = CustomRuleSGD(learning_rate=0.05, update_rule=shrink_rule)
