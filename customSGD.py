@@ -5,6 +5,7 @@ Created on Wed Oct  8 13:19:29 2025
 @author: Divya
 """
 import tensorflow as tf
+import numpy as np
 
 
 class CustomRuleSGD(tf.compat.v1.train.GradientDescentOptimizer):
@@ -89,15 +90,42 @@ def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
             upd = (1.0 - alpha_t) * grad + alpha_t * m_t
             delta = lr_t * upd         # THIS is the amount to subtract from var
            
-            print("In gradient update rule - gradient")
-            print(grad)
-            print("In gradient update rule - delta")
-            print(delta)
+           # print("In gradient update rule - gradient")
+           # print(grad)
+            #print("In gradient update rule - delta")
+            #print(delta)
             
             return tf.identity(delta, name="ema_blend_delta")
   
     # expose slots if you want to read them later (optional)
     update_rule.ema_slots = slots
     return update_rule
+
+
+def exp_decay_weights(n, *, alpha=None, half_life=None, rate=None,
+                      newest='last', normalize=True, dtype=float):
+   #Returns length-n weights w where newer samples get larger weight.
+   # newest: 'last' -> newest is index n-1   | 'first' -> newest is index 0
+   # Only one of alpha, half_life, rate should be given.
+     if alpha is None and half_life is None and rate is None:
+        alpha = 0.9  # default
+     if half_life is not None:
+        alpha = 2.0 ** (-1.0 / float(half_life))
+     if rate is not None:
+        # exact exp form; ignore alpha
+        k = np.arange(n, dtype=dtype)
+        w = np.exp(-float(rate) * k)
+     else:
+        k = np.arange(n, dtype=dtype)
+        w = np.power(float(alpha), k)
+
+     if newest == 'last':      # make the last item the newest
+        w = w[::-1]
+     if normalize:
+        print("w", w)
+        s = w.sum()
+        if s != 0:
+            w = w / s
+     return w.astype(dtype)
 
 

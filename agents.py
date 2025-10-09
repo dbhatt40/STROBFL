@@ -21,7 +21,7 @@ from utils.census_utils import census_model_1
 from utils.cifar_utils import cifar10_model
 
 from utils.eval_utils import eval_minimal
-from customSGD import CustomRuleSGD, gradient_update_rule_factory
+from customSGD import CustomRuleSGD, gradient_update_rule_factory, exp_decay_weights
 
 import global_vars as gv
 
@@ -54,12 +54,6 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     #     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     #     eval_success, eval_loss = eval_minimal(X_test,Y_test,shared_weights)
     #     print('Global success at time {}: {}, loss {}'.format(t,eval_success,eval_loss))
-
-    if args.steps is not None:
-        num_steps = args.steps
-    else:
-        num_steps = int(args.E * shard_size / args.B)
-
     # with tf.device('/gpu:'+str(gpu_id)):
     if args.dataset == 'census':
         x = tf.placeholder(shape=(None,gv.DATA_DIM), dtype=tf.float32)
@@ -70,7 +64,49 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         agent_model = census_model_1()
     else:
         return
-  
+      
+    
+    print("X shape:", X_shard.shape, "Y shape:", Y_shard.shape)
+    print("Y[0]:", Y_shard[0], "Y[1]:", Y_shard[1])
+
+    mask1 = (Y_shard[:, 0] == 1)
+    X_label1shard = X_shard[mask1]
+    Y_label1shard = Y_shard[mask1]
+
+    mask2 = (Y_shard[:, 1] == 1)
+    X_label2shard = X_shard[mask2]
+    Y_label2shard = Y_shard[mask2]
+
+    print("Label 1 - X shape:", X_label1shard.shape, "Y shape:", Y_label1shard.shape)
+    print("Label 2 - X shape:", X_label2shard.shape, "Y shape:", Y_label2shard.shape)
+
+    num_features = 104
+    num_labels = 2
+    LabelData = np.empty((num_labels, 1), dtype=int)   # 2-D grid of “slots”
+    LabelData[0][0] = Y_label1shard.shape[0]
+    LabelData[1][0] = Y_label2shard.shape[0]
+    
+    MeanData = np.empty((num_labels, num_features))  # 2-D grid of “slots”
+    n1 = LabelData[0][0] 
+    X_label1shardw = X_label1shard
+    if(n1!=0):
+      w = exp_decay_weights(n1, alpha=0.9, newest='last', normalize=True)   
+      X_label1shardw = X_label1shard * w[:, np.newaxis]
+      MeanData[0]= np.average(X_label1shardw, axis=0)
+
+    X_label2shardw = X_label2shard
+    n2 = LabelData[1][0] 
+    if(n2!=0):
+      w = exp_decay_weights(n2, alpha=0.9, newest='last', normalize=True)  
+      X_label2shardw = X_label2shard * w[:, np.newaxis] 
+      MeanData[1]= np.average(X_label2shardw, axis=0)
+ 
+
+    if args.steps is not None:
+        num_steps = args.steps
+    else:
+        num_steps = int(args.E * shard_size / args.B)
+      
     logits = agent_model(x)
     probs = tf.nn.softmax(logits) 
     loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits))
@@ -117,9 +153,14 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
 
     for step in range(num_steps):
         offset = (start_offset + step * args.B) % (shard_size - args.B)
-        X_batch = X_shard[offset: (offset + args.B)]
-        Y_batch = Y_shard[offset: (offset + args.B)]
+        X_stacked = np.vstack((X_label1shardw, X_label2shardw))
+        Y_stacked = np.vstack((Y_label1shard, Y_label2shard))
+        X_batch = X_stacked[offset: (offset + args.B)]
+        Y_batch = Y_stacked[offset: (offset + args.B)]
         Y_batch_uncat = np.argmax(Y_batch, axis=1)
+        #X_batch = X_shard[offset: (offset + args.B)
+        #Y_batch = Y_shard[offset: (offset + args.B)]
+        #Y_batch_uncat = np.argmax(Y_batch, axis=1)
         _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
         if step % 1000 == 0:
             print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
