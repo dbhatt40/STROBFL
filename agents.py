@@ -85,17 +85,21 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     LabelData = np.empty((num_labels, 1), dtype=int)   # 2-D grid of “slots”
     LabelData[0][0] = Y_label1shard.shape[0]
     LabelData[1][0] = Y_label2shard.shape[0]
+   
     
     MeanData = np.empty((num_labels, num_features))  # 2-D grid of “slots”
     n1 = LabelData[0][0] 
-    X_label1shardw = X_label1shard
+    n2 = LabelData[1][0] 
+    N=n1+n2
+    imbalance_w1 = N/(num_labels*n1)
+    imbalance_w2 = N/(num_labels*n2)
+    X_label1shardw = imbalance_w1*X_label1shard
     if(n1!=0):
       w = exp_decay_weights(n1, alpha=0.9, newest='last', normalize=True)   
       X_label1shardw = X_label1shard * w[:, np.newaxis]
       MeanData[0]= np.average(X_label1shardw, axis=0)
 
-    X_label2shardw = X_label2shard
-    n2 = LabelData[1][0] 
+    X_label2shardw =  imbalance_w2*X_label2shard
     if(n2!=0):
       w = exp_decay_weights(n2, alpha=0.9, newest='last', normalize=True)  
       X_label2shardw = X_label2shard * w[:, np.newaxis] 
