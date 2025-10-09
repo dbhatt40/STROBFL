@@ -50,4 +50,54 @@ def shrink_rule(grad, var, lr_t, global_step):
       wd = 1e-4
       return lr_t * (grad + wd * var)
 
-# opt = CustomRuleSGD(learning_rate=0.05, update_rule=shrink_rule)
+
+def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
+    """
+    Returns an update_rule(grad, var, lr_t, global_step) that:
+      m_t = alpha_t * m_{t-1} + (1 - alpha) * grad
+      u_t = (1 - mix) * grad + mix * m_t
+      delta = lr_t * u_t
+   
+    """
+    # One non-trainable slot per variable, created lazily on first use.
+    slots = {}  # maps var.ref() -> tf.Variable (EMA slot)
+
+    def _slot_for(var):
+        key = var.ref()
+        if key not in slots:
+            slots[key] = tf.Variable(
+                tf.zeros_like(var), trainable=False,
+                name=f"{name_prefix}/{var.op.name.replace(':','_')}"
+            )
+        return slots[key]
+
+    def update_rule(grad, var, lr_t, global_step):
+        # Handle IndexedSlices (sparse) the simple way by densifying.
+        # If you have huge embeddings, implement a scatter version instead.
+        if isinstance(grad, tf.IndexedSlices):
+            grad = tf.convert_to_tensor(grad)
+
+        m = _slot_for(var)
+        alpha_t = tf.convert_to_tensor(alpha, dtype=var.dtype.base_dtype)
+       
+
+        # m_t = alpha*m + (1-alpha)*grad
+        m_t = m.assign(alpha_t * m + (1.0 - alpha_t) * grad)
+
+        # use control dependency so the EMA update happens before using m_t
+        with tf.control_dependencies([m_t]):
+            upd = (1.0 - alpha_t) * grad + alpha_t * m_t
+            delta = lr_t * upd         # THIS is the amount to subtract from var
+           
+            print("In gradient update rule - gradient")
+            print(grad)
+            print("In gradient update rule - delta")
+            print(delta)
+            
+            return tf.identity(delta, name="ema_blend_delta")
+  
+    # expose slots if you want to read them later (optional)
+    update_rule.ema_slots = slots
+    return update_rule
+
+
