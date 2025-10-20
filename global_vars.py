@@ -31,12 +31,12 @@ def dir_name_fn(args):
     interpret_figs_dir_name = 'interpret_figs/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
         args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
     
-    if args.datadir !='':
-        current_dir = os.getcwd()
+
+    current_dir = os.getcwd()
 		# Go up one level and into another directory (e.g., "data")
-        data_dir = os.path.join(os.path.dirname(current_dir), "\\data")
-		
-		
+    data_dir = os.path.join(os.path.dirname(current_dir), "data")
+	
+	
 		
     if args.gar != 'avg':
         dir_name = dir_name + '_' + args.gar
@@ -104,8 +104,7 @@ def init():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default='uci-sensor',
                         help="dataset to be used")
-    parser.add_argument("--datadir", default='',
-                        help="directory for data")
+
     parser.add_argument("--model_num", type=int,
                         default=0, help="model to be used")
     parser.add_argument("--optimizer", default='sgd',
