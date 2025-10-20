@@ -15,7 +15,6 @@ tf.disable_v2_behavior()
 import logging
 tf.get_logger().setLevel(logging.ERROR)
 
-
 def dir_name_fn(args):
     # Setting directory name to store computed weights
     dir_name = 'weights/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
@@ -181,7 +180,7 @@ def init():
 
     global max_agents_per_gpu
 
-    global IMAGE_ROWS, IMAGE_COLS, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE
+    global IMAGE_ROWS, IMAGE_COLS, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM
 
     global max_acc
 
@@ -199,7 +198,6 @@ def init():
         mem_frac = 0.3
         moving_rate = 1.0
     elif args.dataset == 'census':
-        global DATA_DIM
         DATA_DIM = 104
         BATCH_SIZE = 50
         NUM_CLASSES = 2
@@ -207,8 +205,7 @@ def init():
         max_agents_per_gpu = 6
         mem_frac = 0.05
         moving_rate = 1.0
-    elif args.dataset == 'uci-sensor':
-        global DATA_DIM
+    elif args.dataset == 'uci-sensor':      
         DATA_DIM = 128
         WINDOW_SIZE = 50
         NUM_CLASSES = 6
