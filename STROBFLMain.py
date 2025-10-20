@@ -38,8 +38,6 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	simul_num = min(num_agents_per_time, simul_agents)
 	alpha_i = 1.0 / args.k
 	agent_indices = np.arange(args.k)
-	if args.mal:
-		mal_agent_index = gv.mal_agent_index
 
 	unupated_frac = (args.k - num_agents_per_time) / float(args.k)
 	t = 0
@@ -85,12 +83,6 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				if args.mal is False or i < mal_agent_index:
 					p = Process(target=agent, args=(i, X_train_shards[i],
 													Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
-				elif args.mal is True and i >= mal_agent_index:
-					p = Process(target=mal_agent, args=(i, X_train_shards[i],
-														Y_train_shards[i], mal_data_X, mal_data_Y, t,
-														gpu_id, return_dict, mal_visible, X_test, Y_test))
-					mal_active = 1
-
 				p.start()
 				process_list.append(p)
 				k += 1
@@ -99,43 +91,24 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 			agents_left = num_agents_per_time - k
 			print('Agents left:%s' % agents_left)
 
-		if mal_active == 1:
-			mal_visible.append(t)
-
 		print('Joined all processes for time step %s' % t)
+
 		global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
         
-        
+
 		if 'avg' in args.gar:
 			print('Using standard mean aggregation')
-			if args.mal:
-				count = 0
-				for k in range(num_agents_per_time):
-					if curr_agents[k] != mal_agent_index:
-						if count == 0:
-							ben_delta = alpha_i * return_dict[str(curr_agents[k])]
-							np.save(gv.dir_name + 'ben_delta_sample%s.npy' % t, return_dict[str(curr_agents[k])])
-							count += 1
-						else:
-							ben_delta += alpha_i * return_dict[str(curr_agents[k])]
-
-				np.save(gv.dir_name + 'ben_delta_t%s.npy' % t, ben_delta)
-				global_weights += alpha_i * return_dict[str(mal_agent_index)]
-				global_weights += ben_delta
-			else:
-				for k in range(num_agents_per_time):
+			for k in range(num_agents_per_time):
 					global_weights += alpha_i * return_dict[str(curr_agents[k])]
 		
+	
+
 		# Saving for the next update
 		np.save(gv.dir_name + 'global_weights_t%s.npy' %
 				(t + 1), global_weights)
 
 		# Evaluate global weight
-		if args.mal:
-			p_eval = Process(target=eval_func, args=(
-				X_test, Y_test, t + 1, return_dict, mal_data_X, mal_data_Y), kwargs={'global_weights': global_weights})
-		else:
-			p_eval = Process(target=eval_func, args=(
+		p_eval = Process(target=eval_func, args=(
 				X_test, Y_test, t + 1, return_dict), kwargs={'global_weights': global_weights})
 		p_eval.start()
 		p_eval.join()
@@ -178,10 +151,6 @@ def main(args):
 		Y_train_shards.append(np.concatenate([Y_slices[slice_idx] for slice_idx in idxs]))
 	
 	
-	if args.mal:
-		# Load malicious data
-		mal_data_X, mal_data_Y, true_labels = mal_data_setup(X_test, Y_test, Y_test_uncat)
-
 	if args.train:
 		p = Process(target=master)
 		p.start()
@@ -192,14 +161,7 @@ def main(args):
 		return_dict['eval_success'] = 0.0
 		return_dict['eval_loss'] = 0.0
 
-		if args.mal:
-			return_dict['mal_suc_count'] = 0
-			t_final = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
-							   return_dict, mal_data_X, mal_data_Y)
-			print('Malicious agent succeeded in %s of %s iterations' %
-				  (return_dict['mal_suc_count'], t_final * args.mal_num))
-		else:
-			_ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
+		_ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
 						 return_dict)
 	else:
 		manager = Manager()
@@ -212,11 +174,7 @@ def main(args):
 			if not os.path.exists(gv.dir_name + 'global_weights_t%s.npy' % t):
 				print('No directory found for iteration %s' % t)
 				break
-			if args.mal:
-				p_eval = Process(target=eval_func, args=(
-					X_test, Y_test_uncat, t, return_dict, mal_data_X, mal_data_Y))
-			else:
-				p_eval = Process(target=eval_func, args=(
+			p_eval = Process(target=eval_func, args=(
 					X_test, Y_test_uncat, t, return_dict))
 
 			p_eval.start()

@@ -15,6 +15,8 @@ tf.disable_v2_behavior()
 import logging
 tf.get_logger().setLevel(logging.ERROR)
 
+global data_dir
+
 def dir_name_fn(args):
     # Setting directory name to store computed weights
     dir_name = 'weights/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
@@ -183,20 +185,7 @@ def init():
 
     global max_acc
 
-    if 'MNIST' in args.dataset:
-        IMAGE_ROWS = 28
-        IMAGE_COLS = 28
-        NUM_CHANNELS = 1
-        NUM_CLASSES = 10
-        BATCH_SIZE = 75
-        if args.dataset == 'MNIST':
-            max_acc = 100.0
-        elif args.dataset == 'fMNIST':
-            max_acc = 90.0
-        max_agents_per_gpu = 2
-        mem_frac = 0.3
-        moving_rate = 1.0
-    elif args.dataset == 'census':
+    if args.dataset == 'census':
         DATA_DIM = 104
         BATCH_SIZE = 50
         NUM_CLASSES = 2
@@ -212,16 +201,7 @@ def init():
         max_agents_per_gpu = 6
         mem_frac = 0.05
         moving_rate = 1.0
-    elif args.dataset == 'CIFAR-10':
-        IMAGE_COLS = 32
-        IMAGE_ROWS = 32
-        NUM_CHANNELS = 3
-        NUM_CLASSES = 10
-        BATCH_SIZE = 100
-        max_acc = 90.0
-        max_agents_per_gpu = 1
-        mem_frac = 0.05
-        moving_rate = 1.0
+    
 
     if max_agents_per_gpu < 1:
         max_agents_per_gpu = 1
@@ -229,7 +209,7 @@ def init():
     global gpu_options
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=mem_frac)
 
-    global dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name, data_dir
+    global dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name
 
     dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name, data_dir = dir_name_fn(
         args)
