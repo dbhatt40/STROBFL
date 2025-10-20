@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 import global_vars as gv
 
 def data_uci_sensor():
-	data_path = os.path.join(os.path.dirname(gv.data_dir), "\\gas_sensor\\gas_drift_all_batches.csv")
+	data_path = os.path.join(os.path.dirname(data_dir), "\\gas_sensor\\gas_drift_all_batches.csv")
 	df = pd.read_csv(data_path)
 	df = df.replace(r'\b\d+:\s*', '', regex=True)
 	print("UCI Sensor Dataset shape:", df.shape)

@@ -122,7 +122,10 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     # updaterule = gradient_update_rule_factory(alpha=0.2)
     # if args.optimizer == 'strsgd':
     #     optimizer = CustomRuleSGD(learning_rate=0.05, update_rule=updaterule).minimize(loss)
-    if args.optimizer == 'sgd':
+    if args.optimizer == 'adam':
+        optimizer = tf.train.AdamOptimizer(
+            learning_rate=lr).minimize(loss)
+    elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
 
