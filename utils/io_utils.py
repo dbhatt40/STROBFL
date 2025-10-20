@@ -1,11 +1,10 @@
 #########################
 # Purpose: Help with file input/output
 ########################
-import os
+
 import global_vars as gv
 import numpy as np
 
-from keras.utils import np_utils
 from .census_utils import data_census
 from .gas_sensor_utils import data_uci_sensor
 

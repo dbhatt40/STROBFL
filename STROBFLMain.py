@@ -17,17 +17,10 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 from multiprocessing import Process, Manager
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.decomposition import PCA
-from sklearn.decomposition import KernelPCA
-from sklearn.cluster import KMeans
-from utils.io_utils import data_setup, mal_data_setup
+from utils.io_utils import data_setup
 import global_vars as gv
 from agents import agent, master
-from utils.eval_utils import eval_func, eval_minimal
-from malicious_agent import mal_agent
-from utils.dist_utils import collate_weights, model_shape_size
-from math import log, inf
+from utils.eval_utils import eval_func
 
 
 def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
@@ -39,22 +32,14 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	alpha_i = 1.0 / args.k
 	agent_indices = np.arange(args.k)
 
-	unupated_frac = (args.k - num_agents_per_time) / float(args.k)
 	t = 0
-	mal_visible = []
 	eval_loss_list = []
-	loss_track_list = []
 	lr = args.eta
-	loss_count = 0
-	E = None
-	beta = 0.5
 	param_dict = dict()
 	param_dict['offset'] = [0]
 	param_dict['shape'] = []
 
-	G = [None for i in range(0,args.k)]
 	r = [1 for i in range(0,args.k)]
-	Delta = 0.1
 
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
@@ -66,7 +51,6 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 		probs = [elem/probs_sum for elem in probs]
 
 		process_list = []
-		mal_active = 0
 		curr_agents = np.random.choice(agent_indices, num_agents_per_time,
 									   replace=False,p=probs)
 		print('Set of agents chosen: %s' % curr_agents)
@@ -80,8 +64,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-				if args.mal is False or i < mal_agent_index:
-					p = Process(target=agent, args=(i, X_train_shards[i],
+				p = Process(target=agent, args=(i, X_train_shards[i],
 													Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
 				p.start()
 				process_list.append(p)
