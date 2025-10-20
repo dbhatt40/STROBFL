@@ -31,7 +31,14 @@ def dir_name_fn(args):
 
     interpret_figs_dir_name = 'interpret_figs/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
         args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
-
+    
+    if args.datadir !='':
+        current_dir = os.getcwd()
+		# Go up one level and into another directory (e.g., "data")
+        data_dir = os.path.join(os.path.dirname(current_dir), "\\data")
+		
+		
+		
     if args.gar != 'avg':
         dir_name = dir_name + '_' + args.gar
         output_file_name = output_file_name + '_' + args.gar
@@ -90,20 +97,21 @@ def dir_name_fn(args):
     # print(dir_name)
     # print(output_file_name)
 
-    return dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name
+    return dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name, data_dir
 
 
 def init():
     # Reading in arguments for the run
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default='census',
+    parser.add_argument("--dataset", default='uci-sensor',
                         help="dataset to be used")
+    parser.add_argument("--datadir", default='',
+                        help="directory for data")
     parser.add_argument("--model_num", type=int,
                         default=0, help="model to be used")
     parser.add_argument("--optimizer", default='sgd',
                         help="optimizer to be used")
-    parser.add_argument("--eta", type=float, default=1e-3,
-                        help="learning rate")
+
     parser.add_argument("--k", type=int, default=2, help="number of agents")
     parser.add_argument("--C", type=float, default=0.5,
                         help="fraction of agents per time step")
@@ -113,15 +121,22 @@ def init():
                         help="GD steps per agent")
     parser.add_argument("--T", type=int, default=2, help="max time_steps")
     parser.add_argument("--B", type=int, default=75, help="agent batch size")
+    parser.add_argument("--gar", type=str, default='avg',
+                        help='Gradient Aggregation Rule')
+    parser.add_argument('--iid', type=float, default=1.0,
+                        help="degree to which data is independent, identically distributed (range [0,1], higher is more iid)")
+	
+    parser.add_argument("--eta", type=float, default=1e-3,
+                        help="learning rate")
     parser.add_argument("--train", default=True, action='store_true')
     parser.add_argument("--lr_reduce", action='store_true')
     parser.add_argument("--mal", default=False, action='store_true')
-    parser.add_argument("--num_mal", type=int, default=1, help="number of malicious agents")
+    parser.add_argument("--num_mal", type=int, default=0, help="number of malicious agents")
     parser.add_argument("--mal_obj", default='single',
                         help='Objective for malicious agent')
     parser.add_argument("--mal_strat", default='asyncFL',
                         help='Strategy for malicious agent')
-    parser.add_argument("--mal_num", type=int, default=1,
+    parser.add_argument("--mal_num", type=int, default=0,
                         help='Objective for simultaneous targeting')
     parser.add_argument("--mal_delay", type=int, default=0,
                         help='Delay for wait till converge')
@@ -131,16 +146,13 @@ def init():
                         help='Benign training epochs for malicious agent')
     parser.add_argument("--ls", type=int, default=1,
                         help='Training steps for each malicious step')
-    parser.add_argument("--gar", type=str, default='avg',
-                        help='Gradient Aggregation Rule')
     parser.add_argument("--rho", type=float, default=1e-4,
                         help='Weighting factor for distance constraints')
     parser.add_argument("--data_rep", type=float, default=10,
                         help='Data repetitions for data poisoning')
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None,
                         help='GPUs to run on')
-    parser.add_argument('--iid', type=float, default=1.0,
-                        help="degree to which data is independent, identically distributed (range [0,1], higher is more iid)")
+  
 
     global args
     args = parser.parse_args()
@@ -169,7 +181,7 @@ def init():
 
     global max_agents_per_gpu
 
-    global IMAGE_ROWS, IMAGE_COLS, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE
+    global IMAGE_ROWS, IMAGE_COLS, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE
 
     global max_acc
 
@@ -195,6 +207,15 @@ def init():
         max_agents_per_gpu = 6
         mem_frac = 0.05
         moving_rate = 1.0
+    elif args.dataset == 'uci-sensor':
+        global DATA_DIM
+        DATA_DIM = 128
+        WINDOW_SIZE = 50
+        NUM_CLASSES = 6
+        max_acc = 85.0
+        max_agents_per_gpu = 6
+        mem_frac = 0.05
+        moving_rate = 1.0
     elif args.dataset == 'CIFAR-10':
         IMAGE_COLS = 32
         IMAGE_ROWS = 32
@@ -212,9 +233,9 @@ def init():
     global gpu_options
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=mem_frac)
 
-    global dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name
+    global dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name, data_dir
 
-    dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name = dir_name_fn(
+    dir_name, output_dir_name, output_file_name, figures_dir_name, interpret_figs_dir_name, data_dir = dir_name_fn(
         args)
 
     return args
