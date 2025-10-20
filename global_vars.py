@@ -36,7 +36,7 @@ def dir_name_fn(args):
 
     current_dir = os.getcwd()
 		# Go up one level and into another directory (e.g., "data")
-    data_dir = os.path.join(os.path.dirname(current_dir), "data")
+    data_dir = current_dir + "/data"
 	
 	
 		
