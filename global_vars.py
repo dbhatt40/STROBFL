@@ -193,8 +193,9 @@ def init():
         max_agents_per_gpu = 6
         mem_frac = 0.05
         moving_rate = 1.0
-    elif args.dataset == 'uci-sensor':      
+    elif args.dataset == 'uci-sensor':     
         DATA_DIM = 128
+        BATCH_SIZE = 50
         WINDOW_SIZE = 50
         NUM_CLASSES = 6
         max_acc = 85.0

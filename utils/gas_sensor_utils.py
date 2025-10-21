@@ -19,16 +19,17 @@ from sklearn.preprocessing import StandardScaler
 import global_vars as gv
 
 def data_uci_sensor():
-	print("Data dir:", gv.data_dir)
-	data_path = gv.data_dir + "/gas_sensor/gas_drift_all_batches.csv"
+	
+	data_path =  "/content/STROBFL/data/gas_sensor/gas_drift_all_batches.csv"
 	print("UCI data path:", data_path)
 
 	df = pd.read_csv(data_path)
 	df = df.replace(r'\b\d+:\s*', '', regex=True)
 	print("UCI Sensor Dataset shape:", df.shape)
 	print(df.head())
-	X = df.iloc[:, 0:gv.DATA_DIM].to_numpy()
+	X = df.iloc[:, 1:gv.DATA_DIM+1].to_numpy()
 	y = df.iloc[:,[0]].to_numpy()
+	print("UCI Sensor x,y shape:", X.shape, y.shape)
 	X_train, X_test, y_train, y_test = train_test_split(
 	    X, y, test_size=0.2, random_state=42, stratify=y
 	)
