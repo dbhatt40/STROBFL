@@ -48,12 +48,9 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
 
 
     # with tf.device('/gpu:'+str(gpu_id)):
-    if args.dataset == 'census':
+    if (args.dataset == 'census') or (args.dataset == 'uci-sensor'):
         x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
         y = tf.placeholder(dtype=tf.int64)
-    elif args.dataset == 'uci-sensor':
-        x = tf.placeholder(tf.float32, shape=(None, gv.DATA_DIM), name='x')
-        y = tf.placeholder(tf.int32,   shape=(None,), name='y')   # (B,)
     print("x shape & y shape:", x.shape, y.shape)
 	
 	
@@ -68,14 +65,12 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     print("Logits:", logits)
     print("y labels:", y)
     print("logits & y shape:", logits.shape, y.shape)
-    if args.dataset == 'census':
+    if (args.dataset == 'census') or (args.dataset == 'uci-sensor'):
+        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=y, logits=logits))
         # loss = tf.nn.sigmoid_cross_entropy_with_logits(
         #     labels=y, logits=logits)
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=y, logits=logits))
-    else:
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=y, logits=logits))
+
 		
 		
     prediction = tf.nn.softmax(logits)
@@ -118,8 +113,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         offset = (start_offset + step * args.B) % (shard_size - args.B)
         X_batch = X_shard[offset: (offset + args.B)]
         Y_batch = Y_shard[offset: (offset + args.B)]
-        # Y_batch_uncat = np.argmax(Y_batch, axis=1)
-        Y_batch_uncat = np.asarray(Y_batch, dtype=np.int32).reshape(-1) 
+        Y_batch_uncat = np.argmax(Y_batch, axis=1)
+
 
         print("X_batch, Y_batch, Y_batch_uncat, offset:", X_batch.shape, Y_batch.shape, Y_batch_uncat.shape, offset)
         print("X_batch, Y_batch, Y_batch_uncat, offset:", X_batch, Y_batch, Y_batch_uncat, offset)

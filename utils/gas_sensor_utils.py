@@ -15,6 +15,7 @@ from keras.layers import Input, Dense, Dropout
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 import global_vars as gv
 
@@ -27,8 +28,8 @@ def data_uci_sensor():
 	df = df.replace(r'\b\d+:\s*', '', regex=True)
 	print("UCI Sensor Dataset shape:", df.shape)
 	print(df.head())
-	X = df.iloc[:, 1:gv.DATA_DIM+1].to_numpy()
-	y = df.iloc[:,[0]].to_numpy()
+	X = df.iloc[1:, 1:gv.DATA_DIM+1].to_numpy()
+	y = df.iloc[1:,0].to_numpy()
 	print("UCI Sensor x,y shape:", X.shape, y.shape)
 	X_train, X_test, y_train, y_test = train_test_split(
 	    X, y, test_size=0.2, random_state=42, stratify=y
@@ -36,6 +37,10 @@ def data_uci_sensor():
 	scaler = StandardScaler()
 	X_train = scaler.fit_transform(X_train)
 	X_test = scaler.transform(X_test)
+	
+	y_train = np_utils.to_categorical(y_train, gv.NUM_CLASSES)
+	y_test = np_utils.to_categorical(y_test, gv.NUM_CLASSES)
+	
 	return X_train, y_train, X_train, y_test
 
 def uci_sensor_model():

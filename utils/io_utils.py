@@ -139,7 +139,7 @@ def data_setup():
 		print('Loaded Census data')
 	elif args.dataset == 'uci-sensor':
 			X_train, Y_train, X_test, Y_test = data_uci_sensor()
-			Y_test_uncat = np.argmax(Y_test, axis=1)
+			Y_test_uncat = Y_test
 			# print Y_test
 			# print Y_test_uncat
 			print('Loaded UCI sensor data')
