@@ -43,7 +43,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
-		print('Time step %s' % t)
+		print('----------Training client in time step %s---------' % t)
 		
 		lmbda = args.C*(1-args.C)
 		probs = [args.C + lmbda*ri for ri in r]
@@ -105,7 +105,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 
 def main(args):
 	X_train, Y_train, X_test, Y_test, Y_test_uncat = data_setup()
-	
+	print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
 	keys = []
 	for i in range(Y_train.shape[1]):
 		keys.append(Y_train[:,i])

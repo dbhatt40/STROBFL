@@ -22,30 +22,30 @@ from collections import OrderedDict
 def eval_setup(global_weights):
     args = gv.args
 
-    if 'MNIST' in args.dataset:
-        tf.keras.backend.set_learning_phase(0)
-
+ 
     # global_weights_np = np.load(gv.dir_name + 'global_weights_t%s.npy' % t)
     global_weights_np = global_weights
 
     if args.dataset == 'census':
         global_model = census_model_1()
+        x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
+        y = tf.placeholder(dtype=tf.int64)
     elif args.dataset == 'uci-sensor':
         global_model = uci_sensor_model()
-
-    if args.dataset == 'census':
-        x = tf.placeholder(shape=(None,
-                                gv.DATA_DIM), dtype=tf.float32)
-    else:
-        x = tf.placeholder(shape=(None,
-                               gv.DATA_DIM), dtype=tf.float32)
-    y = tf.placeholder(dtype=tf.int64)
-
+        x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
+        y = tf.placeholder(shape=(None,gv.NUM_CLASSES), dtype=tf.float32)
     logits = global_model(x)
-    prediction = tf.nn.softmax(logits)
-    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=y, logits=logits))
-
+	
+    if args.dataset == 'census':
+       prediction = tf.nn.softmax(logits)
+       loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+           labels=y, logits=logits))
+    elif args.dataset == 'uci-sensor':
+       prediction = tf.nn.softmax(logits)
+       # print("In Eval functionLabels shape and Logits", logits.shape, y.shape)
+       loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=logits))
+       # print("After setting loss")
+	   
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
         config.gpu_options.allow_growth = True
@@ -64,28 +64,28 @@ def eval_setup(global_weights):
 
 def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
 
-    args = gv.args
-
+    # args = gv.args
+    # print("Shape of x, y test slice:", X_test.shape, Y_test.shape)
     x, y, sess, prediction, loss = eval_setup(global_weights)
 
     pred_np = np.zeros((len(X_test), gv.NUM_CLASSES))
     eval_loss = 0.0
-
-    if args.dataset == 'CIFAR-10':
-        Y_test = Y_test.reshape(len(Y_test))
 
     for i in range(int(len(X_test) / gv.BATCH_SIZE)):
         X_test_slice = X_test[i * (gv.BATCH_SIZE):(i + 1) * (gv.BATCH_SIZE)]
         Y_test_slice = Y_test[i * (gv.BATCH_SIZE):(i + 1) * (gv.BATCH_SIZE)]
         # Y_test_cat_slice = np_utils.to_categorical(Y_test_slice)
         pred_np_i = sess.run(prediction, feed_dict={x: X_test_slice})
+        # print("Shape of prediction", pred_np_i.shape, pred_np_i)
+        # print("Shape of x, y test slice:", X_test_slice.shape, Y_test_slice.shape)
+		
         eval_loss += sess.run(loss,
                               feed_dict={x: X_test_slice, y: Y_test_slice})
         pred_np[i * gv.BATCH_SIZE:(i + 1) * gv.BATCH_SIZE, :] = pred_np_i
-    eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)
+        eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)
 
-    eval_success = 100.0 * \
-        np.sum(np.argmax(pred_np, 1) == Y_test) / len(Y_test)
+        eval_success = 100.0 * \
+            np.sum(np.argmax(pred_np, 1) ==np.argmax(Y_test,1)) / len(Y_test)
     # print pred_np[:100]
     # print Y_test[:100]
 

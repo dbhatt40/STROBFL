@@ -48,10 +48,13 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
 
 
     # with tf.device('/gpu:'+str(gpu_id)):
-    if (args.dataset == 'census') or (args.dataset == 'uci-sensor'):
+    if (args.dataset == 'census'):
         x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
         y = tf.placeholder(dtype=tf.int64)
-    print("x shape & y shape:", x.shape, y.shape)
+    elif (args.dataset == 'uci-sensor'):
+	        x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
+	        y = tf.placeholder(shape=(None,gv.NUM_CLASSES), dtype=tf.int64)
+    # print("x shape & y shape:", x.shape, y.shape)
 	
 	
     if args.dataset == 'census':
@@ -62,19 +65,20 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         return
 
     logits = agent_model(x)
-    print("Logits:", logits)
-    print("y labels:", y)
-    print("logits & y shape:", logits.shape, y.shape)
-    if (args.dataset == 'census') or (args.dataset == 'uci-sensor'):
+    # print("Logits:", logits)
+    # print("y labels:", y)
+    # print("logits & y shape:", logits.shape, y.shape)
+    if (args.dataset == 'census'):
         loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=y, logits=logits))
+    elif (args.dataset == 'uci-sensor'):
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=y, logits=logits))
+		
         # loss = tf.nn.sigmoid_cross_entropy_with_logits(
         #     labels=y, logits=logits)
-
 		
-		
-    prediction = tf.nn.softmax(logits)
-
+    # prediction = tf.nn.softmax(logits)
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
@@ -110,33 +114,37 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         start_offset = (t * args.B * args.steps) % (shard_size - args.B)
 
     for step in range(num_steps):
+
         offset = (start_offset + step * args.B) % (shard_size - args.B)
         X_batch = X_shard[offset: (offset + args.B)]
         Y_batch = Y_shard[offset: (offset + args.B)]
-        Y_batch_uncat = np.argmax(Y_batch, axis=1)
-
-
-        print("X_batch, Y_batch, Y_batch_uncat, offset:", X_batch.shape, Y_batch.shape, Y_batch_uncat.shape, offset)
-        print("X_batch, Y_batch, Y_batch_uncat, offset:", X_batch, Y_batch, Y_batch_uncat, offset)
+        if args.dataset == 'uci-sensor':
+          Y_batch_uncat =Y_batch
+        else:
+          Y_batch_uncat = np.argmax(Y_batch, axis=1)
         _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
-        if step % 1000 == 0:
-            print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
-            # local_weights = agent_model.get_weights()
-            # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
-            # print('Agent {}, Step {}: success {}, loss {}'.format(i,step,eval_success,eval_loss))
-
+        print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
+#         if step % 1000 == 0:
+#             print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
+#             # local_weights = agent_model.get_weights()
+#             # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
+#             # print('Agent {}, Step {}: success {}, loss {}'.format(i,step,eval_success,eval_loss))
+# 
     local_weights = agent_model.get_weights()
+    # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights
 
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
+    # print("Y test in agents:", Y_test.shape)
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
 # 
-    print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
+    print('*********Agent {}: success {}, loss {}*******'.format(i, eval_success, eval_loss))
 # 
     return_dict[str(i)] = np.array(local_delta)
     return_dict["theta{}".format(i)] = np.array(local_weights)
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (i, t), local_delta)
+
 
     return
 

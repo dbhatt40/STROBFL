@@ -45,7 +45,7 @@ def census_model_1():
 	main_input = Input(shape=(gv.DATA_DIM,), name='main_input')
 	x = Dense(256, use_bias=True, activation='relu')(main_input)
 	x = Dropout(0.5)(x)
-	x = Dense(256, use_bias=True, activation='relu')(main_input)
+	x = Dense(256, use_bias=True, activation='relu')(x)
 	x = Dropout(0.5)(x)
 	# main_output = Dense(1)(x)
 	main_output = Dense(gv.NUM_CLASSES)(x)

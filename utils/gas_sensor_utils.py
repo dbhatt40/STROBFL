@@ -16,6 +16,7 @@ from keras.layers import Input, Dense, Dropout
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+from keras.utils import np_utils
 
 import global_vars as gv
 
@@ -32,27 +33,33 @@ def data_uci_sensor():
 	y = df.iloc[1:,0].to_numpy()
 	print("UCI Sensor x,y shape:", X.shape, y.shape)
 	X_train, X_test, y_train, y_test = train_test_split(
-	    X, y, test_size=0.2, random_state=42, stratify=y
+	    X, y, test_size=0.2, shuffle=False
 	)
 	scaler = StandardScaler()
 	X_train = scaler.fit_transform(X_train)
 	X_test = scaler.transform(X_test)
 	
+	if y_train.min() == 1:
+		   y_train = y_train - 1
+	if y_test.min() == 1:
+           y_test = y_test - 1
+	
 	y_train = np_utils.to_categorical(y_train, gv.NUM_CLASSES)
 	y_test = np_utils.to_categorical(y_test, gv.NUM_CLASSES)
 	
-	return X_train, y_train, X_train, y_test
+	return X_train, y_train, X_test, y_test
 
 def uci_sensor_model():
-	main_input = Input(shape=(gv.DATA_DIM,), name='main_input')
-	x = Dense(256, use_bias=True, activation='relu')(main_input)
-	x = Dropout(0.5)(x)
-	x = Dense(256, use_bias=True, activation='relu')(main_input)
-	x = Dropout(0.5)(x)
-	# main_output = Dense(1)(x)
-	main_output = Dense(gv.NUM_CLASSES)(x)
-	model = Model(inputs=main_input, outputs=main_output)
-	return model
+ 	main_input = Input(shape=(gv.DATA_DIM,), name='main_input')
+ 	x = Dense(256, use_bias=True, activation='relu')(main_input)
+ 	x = Dropout(0.5)(x)
+ 	x = Dense(256, use_bias=True, activation='relu')(x)
+ 	x = Dropout(0.5)(x)
+ 	# main_output = Dense(1)(x)
+ 	main_output = Dense(gv.NUM_CLASSES)(x)
+ 	model = Model(inputs=main_input, outputs=main_output)
+ 	return model
+
 
 
 
