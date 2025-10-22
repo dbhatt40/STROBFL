@@ -138,7 +138,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     # print("Y test in agents:", Y_test.shape)
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
 # 
-    print('*********Agent {}: success {}, loss {}*******'.format(i, eval_success, eval_loss))
+    # print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
 # 
     return_dict[str(i)] = np.array(local_delta)
     return_dict["theta{}".format(i)] = np.array(local_weights)

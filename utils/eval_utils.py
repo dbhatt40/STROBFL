@@ -105,7 +105,7 @@ def eval_func(X_test, Y_test, t, return_dict, mal_data_X=None, mal_data_Y=None, 
 
     eval_success, eval_loss = eval_minimal(X_test, Y_test, global_weights)
 
-    print('Iteration {}: validation accuracy {}, loss {}'.format(t, eval_success, eval_loss))
+    print('*****Iteration {}: validation accuracy {}, loss {} ******'.format(t, eval_success, eval_loss))
     write_dict = OrderedDict()
     write_dict['t'] = t
     write_dict['eval_success'] = eval_success
