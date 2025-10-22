@@ -117,6 +117,7 @@ def main(args):
 	X_train = X_train[sort_indices]
 	
 	num_slices = round(((len(X_train)-args.k)*args.iid+args.k) / args.k) * args.k
+	print("Num slices:", num_slices)
 	
 	slices_per_client = round(num_slices/args.k)
 	
@@ -143,7 +144,7 @@ def main(args):
 		return_dict = manager.dict()
 		return_dict['eval_success'] = 0.0
 		return_dict['eval_loss'] = 0.0
-
+		print("X train shards shapes:", len(X_train_shards), X_train_shards[0].shape)
 		_ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
 						 return_dict)
 	else:
@@ -151,8 +152,7 @@ def main(args):
 		return_dict = manager.dict()
 		return_dict['eval_success'] = 0.0
 		return_dict['eval_loss'] = 0.0
-		if args.mal:
-			return_dict['mal_suc_count'] = 0
+
 		for t in range(args.T):
 			if not os.path.exists(gv.dir_name + 'global_weights_t%s.npy' % t):
 				print('No directory found for iteration %s' % t)
@@ -163,9 +163,7 @@ def main(args):
 			p_eval.start()
 			p_eval.join()
 
-		if args.mal:
-			print('Malicious agent succeeded in %s of %s iterations' %
-				  (return_dict['mal_suc_count'], (t - 1) * args.mal_num))
+		
 
 
 if __name__ == "__main__":

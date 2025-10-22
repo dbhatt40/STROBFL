@@ -22,7 +22,8 @@ import global_vars as gv
 
 def data_uci_sensor():
 	
-	data_path =  "/content/STROBFL/data/gas_sensor/gas_drift_all_batches.csv"
+# 	data_path =  "/content/STROBFL/data/gas_sensor/gas_drift_all_batches.csv"
+	data_path =  "/content/STROBFL/data/gas_sensor/batchesCSV/batch1.csv"
 	print("UCI data path:", data_path)
 
 	df = pd.read_csv(data_path)
@@ -31,13 +32,15 @@ def data_uci_sensor():
 	print(df.head())
 	X = df.iloc[1:, 1:gv.DATA_DIM+1].to_numpy()
 	y = df.iloc[1:,0].to_numpy()
+	
 	print("UCI Sensor x,y shape:", X.shape, y.shape)
 	X_train, X_test, y_train, y_test = train_test_split(
-	    X, y, test_size=0.2, shuffle=False
-	)
+	    X, y, test_size=0.2, shuffle=False)
+
 	scaler = StandardScaler()
 	X_train = scaler.fit_transform(X_train)
 	X_test = scaler.transform(X_test)
+	
 	
 	if y_train.min() == 1:
 		   y_train = y_train - 1
