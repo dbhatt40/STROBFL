@@ -31,7 +31,8 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	simul_num = min(num_agents_per_time, simul_agents)
 	alpha_i = 1.0 / args.k
 	agent_indices = np.arange(args.k)
-
+	print("In agent train, X_train_shard:", len(X_train_shards), X_train_shards[0].shape)
+	print("In agent train, Y_train_shard:", len(Y_train_shards), Y_train_shards[0].shape)
 	t = 0
 	eval_loss_list = []
 	lr = args.eta
@@ -83,9 +84,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 			print('Using standard mean aggregation')
 			for k in range(num_agents_per_time):
 					global_weights += alpha_i * return_dict[str(curr_agents[k])]
-		
 	
-
 		# Saving for the next update
 		np.save(gv.dir_name + 'global_weights_t%s.npy' %
 				(t + 1), global_weights)
@@ -106,34 +105,41 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 def main(args):
 	X_train, Y_train, X_test, Y_test, Y_test_uncat = data_setup()
 	print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
-	keys = []
-	for i in range(Y_train.shape[1]):
-		keys.append(Y_train[:,i])
-	keys = tuple(keys)
-	
-	sort_indices = np.lexsort(keys)
-	
-	Y_train = Y_train[sort_indices]
-	X_train = X_train[sort_indices]
-	
-	num_slices = round(((len(X_train)-args.k)*args.iid+args.k) / args.k) * args.k
-	print("Num slices:", num_slices)
-	
-	slices_per_client = round(num_slices/args.k)
-	
-	X_slices = np.array_split(X_train, num_slices)
-	Y_slices = np.array_split(Y_train, num_slices)
-	
-	slice_indices = np.random.choice(
-		num_slices, num_slices, replace=False)
-	
-	X_train_shards = []
-	Y_train_shards = []
-	for i in range(0,num_slices,slices_per_client):
-		idxs = slice_indices[i:i+slices_per_client]
-		X_train_shards.append(np.concatenate([X_slices[slice_idx] for slice_idx in idxs]))
-		Y_train_shards.append(np.concatenate([Y_slices[slice_idx] for slice_idx in idxs]))
-	
+	X_train_shards = np.array_split(X_train, args.k)
+	Y_train_shards = np.array_split(Y_train, args.k)
+# =============================================================================
+# 	keys = []
+# 	for i in range(Y_train.shape[1]):
+# 		keys.append(Y_train[:,i])
+# 	keys = tuple(keys)
+# 	
+# 	sort_indices = np.lexsort(keys)
+#      
+# 	Y_train = Y_train[sort_indices]
+# 	X_train = X_train[sort_indices]
+# 	
+# 	num_slices = round(((len(X_train)-args.k)*args.iid+args.k) / args.k) * args.k
+# 		
+# 	slices_per_client = round(num_slices/args.k)
+# # 	print("Sort indices:", sort_indices)
+# 	print("Num train slices per client:", slices_per_client)
+# 	
+# 	X_slices = np.array_split(X_train, num_slices)
+# 	Y_slices = np.array_split(Y_train, num_slices)
+# 	
+# 	slice_indices = np.random.choice(
+# 		num_slices, num_slices, replace=False)
+# 	
+# 	X_train_shards = []
+# 	Y_train_shards = []
+# 	for i in range(0,num_slices,slices_per_client):
+# 		idxs = slice_indices[i:i+slices_per_client]
+# 		X_train_shards.append(np.concatenate([X_slices[slice_idx] for slice_idx in idxs]))
+# 		Y_train_shards.append(np.concatenate([Y_slices[slice_idx] for slice_idx in idxs]))
+# =============================================================================
+
+ 
+
 	
 	if args.train:
 		p = Process(target=master)
@@ -144,7 +150,7 @@ def main(args):
 		return_dict = manager.dict()
 		return_dict['eval_success'] = 0.0
 		return_dict['eval_loss'] = 0.0
-		print("X train shards shapes:", len(X_train_shards), X_train_shards[0].shape)
+		
 		_ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
 						 return_dict)
 	else:

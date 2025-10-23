@@ -112,15 +112,15 @@ def init():
     parser.add_argument("--optimizer", default='sgd',
                         help="optimizer to be used")
 
-    parser.add_argument("--k", type=int, default=2, help="number of agents")
+    parser.add_argument("--k", type=int, default=4, help="number of agents")
     parser.add_argument("--C", type=float, default=0.5,
                         help="fraction of agents per time step")
     parser.add_argument("--E", type=int, default=1,
                         help="epochs for each agent")
-    parser.add_argument("--steps", type=int, default=2,
+    parser.add_argument("--steps", type=int, default=0,
                         help="GD steps per agent")
-    parser.add_argument("--T", type=int, default=2, help="max time_steps")
-    parser.add_argument("--B", type=int, default=75, help="agent batch size")
+    parser.add_argument("--T", type=int, default=40, help="max time_steps")
+    parser.add_argument("--B", type=int, default=25, help="agent batch size")
     parser.add_argument("--gar", type=str, default='avg',
                         help='Gradient Aggregation Rule')
     parser.add_argument('--iid', type=float, default=1.0,
@@ -162,11 +162,6 @@ def init():
     #if args.k==1:
     #    assert args.mal==False
 
-    if args.mal:
-        global mal_agent_index
-        global num_mal
-        mal_agent_index = args.k - args.num_mal
-        num_mal = args.num_mal
 
     # Moving rate of 1.0 leads to full overwrite
     global moving_rate
@@ -195,7 +190,7 @@ def init():
         moving_rate = 1.0
     elif args.dataset == 'uci-sensor':     
         DATA_DIM = 128
-        BATCH_SIZE = 50
+        BATCH_SIZE = 10
         WINDOW_SIZE = 50
         NUM_CLASSES = 6
         max_acc = 85.0

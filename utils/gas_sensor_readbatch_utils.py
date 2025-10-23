@@ -23,11 +23,11 @@ def convert_libsvm_to_plain(path_in, path_out, n_features=128):
                 continue
 
             # First token = label
-            y_val = float(parts[0])
+            y_val = int(parts[0])
 
             # Last token = batch (if no colon)
             if ":" not in parts[-1]:
-                batch_val = float(parts[-1])
+                batch_val = int(parts[-1])
                 features = parts[1:-1]
             else:
                 batch_val = np.nan
@@ -59,8 +59,8 @@ def convert_libsvm_to_plain(path_in, path_out, n_features=128):
     return df
 
 # Folder containing the original batch files
-input_path = "../data/gas_sensor/"
-output_path = "../data/gas_sensor/clean_batches/"
+input_path = "../data/gas_sensor/batchesDAT"
+output_path = "../data/gas_sensor/batchesCSV"
 
 # Create output directory if it doesn’t exist
 os.makedirs(output_path, exist_ok=True)
@@ -71,8 +71,10 @@ batch_files = sorted(glob.glob(os.path.join(input_path, "batch*.dat")))
 
 for file in batch_files:
     print(f"Processing {file} ...")
-    outfile = file + ".csv"
-    df_plain = convert_libsvm_to_plain(file, file+".csv", n_features=128)
+    base_name = os.path.splitext(file)[0]  # → "batch1"
+    output_file = base_name + ".csv"             # → "batch1.csv"
+  
+    df_plain = convert_libsvm_to_plain(file, output_file, n_features=128)
 
 
 print("✅ All batches cleaned and saved.")
