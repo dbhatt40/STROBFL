@@ -41,16 +41,13 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	param_dict['shape'] = []
 
 	r = [1 for i in range(0,args.k)]
-	
-
-	 
-
-	agent_offsets = np.zeros((args.k,1))
-	block_size = np.zeros((args.k,1))
-	for ii in range(args.k):
-	 shard_size = X_train_shards[ii].shape[0]
-	 block_size[ii] = int(shard_size/int(args.T))
-	 print("Block size:", block_size[ii])
+	if (args.dataset == 'uci-sensor'):
+		agent_offsets = np.zeros((args.k,1))
+		block_size = np.zeros((args.k,1))
+		for ii in range(args.k):
+		 shard_size = X_train_shards[ii].shape[0]
+		 block_size[ii] = int(shard_size/int(args.T))
+		 print("Block size:", block_size[ii])
 	
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
@@ -75,23 +72,22 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-
-				offset = int(agent_offsets[i])
 				
-				if (t != (args.T-1)):
-					bsize = int(block_size[i])
-				else:					
-					bsize = X_train_shards[i].shape[0] - offset
-				
+				if (args.dataset == 'uci-sensor'):
+				   offset = int(agent_offsets[i])				
+				   if (t != (args.T-1)):
+					   bsize = int(block_size[i])
+				   else:					
+					   bsize = X_train_shards[i].shape[0] - offset				
 			
-				print("Agent, offset indexes, training block size:", i, offset, offset + bsize, bsize)
-				X_batch = X_train_shards[i][offset: (offset + bsize)]
-				Y_batch = Y_train_shards[i][offset: (offset + bsize)]
-				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
-				agent_offsets[i] = agent_offsets[i] + bsize
-				p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, X_test, Y_test, lr))
-
-
+				   print("Agent, offset indexes, training block size:", i, offset, offset + bsize, bsize)
+				   X_batch = X_train_shards[i][offset: (offset + bsize)]
+				   Y_batch = Y_train_shards[i][offset: (offset + bsize)]
+				   print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
+				   agent_offsets[i] = agent_offsets[i] + bsize
+				   p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, X_test, Y_test, lr))
+				elif (args.dataset == 'census'):
+					p = Process(target=agent, args=(i,X_train_shards[i],Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
 				p.start()
 				process_list.append(p)
 				k += 1

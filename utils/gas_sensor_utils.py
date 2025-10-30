@@ -34,7 +34,7 @@ def data_uci_sensor():
 	
     print("UCI Sensor x,y shape:", X.shape, y.shape)
 	
-    split_point = int(len(X) * 0.2)
+    split_point = int(len(X) * 0.1)
     X_test, X_train = X[:split_point], X[split_point:]
     y_test, y_train = y[:split_point], y[split_point:]
 
