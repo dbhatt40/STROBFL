@@ -106,21 +106,20 @@ def init():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default='uci-sensor',
                         help="dataset to be used")
-
-    parser.add_argument("--model_num", type=int,
-                        default=0, help="model to be used")
     parser.add_argument("--optimizer", default='sgd',
                         help="optimizer to be used")
-
     parser.add_argument("--k", type=int, default=4, help="number of agents")
     parser.add_argument("--C", type=float, default=0.5,
                         help="fraction of agents per time step")
+    parser.add_argument("--T", type=int, default=40, help="max time_steps")
+    parser.add_argument("--B", type=int, default=25, help="agent batch size")
+
+    parser.add_argument("--model_num", type=int,
+                        default=0, help="model to be used")
     parser.add_argument("--E", type=int, default=1,
                         help="epochs for each agent")
     parser.add_argument("--steps", type=int, default=0,
                         help="GD steps per agent")
-    parser.add_argument("--T", type=int, default=40, help="max time_steps")
-    parser.add_argument("--B", type=int, default=25, help="agent batch size")
     parser.add_argument("--gar", type=str, default='avg',
                         help='Gradient Aggregation Rule')
     parser.add_argument('--iid', type=float, default=1.0,

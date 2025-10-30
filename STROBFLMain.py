@@ -107,7 +107,7 @@ def main(args):
 	print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
 	N=len(X_train)
 	idx=np.arange(N)
-	num_agents_per_time = int(args.C * args.k)
+	num_agents_per_time = int(args.k)
 	client_idx = [idx[j::num_agents_per_time] for j in range(num_agents_per_time)]
 	X_train_shards = [X_train[ci] for ci in client_idx]
 	Y_train_shards = [Y_train[ci] for ci in client_idx]
