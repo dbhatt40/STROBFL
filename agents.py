@@ -21,7 +21,7 @@ from utils.gas_sensor_utils import uci_sensor_model
 from utils.eval_utils import eval_minimal
 import global_vars as gv
 import utils.streaming_utils as su
-from CustomRuleSGD import CustomRuleSGD
+from customSGD import CustomRuleSGD
 
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
@@ -94,8 +94,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
-    elif args.optimizer == 'strsgd':
-        optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
+    # elif args.optimizer == 'strsgd':
+    #     optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
 	elif args.optimizer == 'strsgd':
 	        optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
 
