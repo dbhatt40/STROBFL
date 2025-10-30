@@ -50,7 +50,10 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 
 	r = [1 for i in range(0,args.k)]
 	
-	iteration_blocks = split_into_t_blocks(X_train_shards, Y_train_shards, args.T)
+	iteration_blocks = []
+	agent=0
+	while agent < args.k:
+	 iteration_blocks[agent] = split_into_t_blocks(X_train_shards[agent], Y_train_shards[agent], args.T)
 
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
@@ -75,7 +78,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-				Xb, yb = iteration_blocks[t]
+				Xb, yb = iteration_blocks[i][t]
 				p = Process(target=agent, args=(i, Xb,yb, t, gpu_id, return_dict, X_test, Y_test, lr))
 # =============================================================================
 # 				p = Process(target=agent, args=(i, X_train_shards[i],
@@ -121,8 +124,8 @@ def main(args):
 	print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
 	N=len(X_train)
 	idx=np.arange(N)
-	num_agents_per_time = int(args.k)
-	client_idx = [idx[j::num_agents_per_time] for j in range(num_agents_per_time)]
+	num_agents= int(args.k)
+	client_idx = [idx[j::num_agents] for j in range(num_agents)]
 	X_train_shards = [X_train[ci] for ci in client_idx]
 	Y_train_shards = [Y_train[ci] for ci in client_idx]
 
