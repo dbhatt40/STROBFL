@@ -22,6 +22,14 @@ import global_vars as gv
 from agents import agent, master
 from utils.eval_utils import eval_func
 
+def split_into_t_blocks(X, y, T):
+    N = len(X)
+    idx = np.arange(N)
+   
+    X_blocks = np.array_split(X[idx], T)  # nearly equal sizes
+    y_blocks = np.array_split(y[idx], T)
+    return list(zip(X_blocks, y_blocks))
+
 
 def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 			 mal_data_X=None, mal_data_Y=None):
@@ -41,6 +49,8 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 	param_dict['shape'] = []
 
 	r = [1 for i in range(0,args.k)]
+	
+	iteration_blocks = split_into_t_blocks(X_train_shards, Y_train_shards, args.T)
 
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
@@ -65,8 +75,12 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-				p = Process(target=agent, args=(i, X_train_shards[i],
-													Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
+				Xb, yb = iteration_blocks[t]
+				p = Process(target=agent, args=(i, Xb,yb, t, gpu_id, return_dict, X_test, Y_test, lr))
+# =============================================================================
+# 				p = Process(target=agent, args=(i, X_train_shards[i],
+# 													Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
+# =============================================================================
 				p.start()
 				process_list.append(p)
 				k += 1

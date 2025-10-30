@@ -43,11 +43,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
 
     pre_theta = None
 
-    if (args.T>1):
-        X_shard_t = np.array_split(X_shard, args.T)
-        Y_shard_t = np.array_split(Y_shard, args.T)
-        shard_size_t = len(X_shard_t)
-        num_steps_t = int(shard_size_t / args.B)
+
 		
     if args.steps != 0:
         num_steps = args.steps
@@ -133,9 +129,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         offset = (start_offset + step * args.B) % (shard_size - args.B)
         X_batch = X_shard[offset: (offset + args.B)]
         Y_batch = Y_shard[offset: (offset + args.B)]
-        offset = (start_offset + step * args.B) % (shard_size - args.B)
-        X_batch = X_shard[offset: (offset + args.B)]
-        Y_batch = Y_shard[offset: (offset + args.B)]
+     
 		
         if args.dataset == 'uci-sensor':
           Y_batch_uncat =Y_batch
