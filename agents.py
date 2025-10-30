@@ -90,10 +90,6 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
-    # elif args.optimizer == 'strsgd':
-    #     optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
-	elif args.optimizer == 'strsgd':
-	        optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
 
 
     if args.k > 1:
@@ -136,22 +132,16 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         else:
           Y_batch_uncat = np.argmax(Y_batch, axis=1)
         _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
-        print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
-#         if step % 1000 == 0:
-#             print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
-#             # local_weights = agent_model.get_weights()
-#             # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
-#             # print('Agent {}, Step {}: success {}, loss {}'.format(i,step,eval_success,eval_loss))
-# 
+        # print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
+ 
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights
 
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape)
-    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
-# 
-    # print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
+    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)# 
+    print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
 # 
     return_dict[str(i)] = np.array(local_delta)
     return_dict["theta{}".format(i)] = np.array(local_weights)

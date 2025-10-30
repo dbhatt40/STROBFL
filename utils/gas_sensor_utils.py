@@ -33,8 +33,13 @@ def data_uci_sensor():
     y = df.iloc[1:,0].to_numpy()
 	
     print("UCI Sensor x,y shape:", X.shape, y.shape)
-    X_train, X_test, y_train, y_test = train_test_split(
-	    X, y, test_size=0.2, shuffle='false')
+	
+    split_point = int(len(X) * 0.2)
+    X_test, X_train = X[:split_point], X[split_point:]
+    y_test, y_train = y[:split_point], y[split_point:]
+
+#     X_train, X_test, y_train, y_test = train_test_split(
+# 	    X, y, test_size=0.2, shuffle='false')
 
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
