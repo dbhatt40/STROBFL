@@ -63,9 +63,9 @@ def eval_setup(global_weights):
 
 
 def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
-
+    args = gv.args
     # args = gv.args
-    # print("Shape of x, y test slice:", X_test.shape, Y_test.shape)
+    print("Shape of x, y test slice:", X_test.shape, Y_test.shape)
     x, y, sess, prediction, loss = eval_setup(global_weights)
 
     pred_np = np.zeros((len(X_test), gv.NUM_CLASSES))
@@ -76,16 +76,22 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
         Y_test_slice = Y_test[i * (gv.BATCH_SIZE):(i + 1) * (gv.BATCH_SIZE)]
         # Y_test_cat_slice = np_utils.to_categorical(Y_test_slice)
         pred_np_i = sess.run(prediction, feed_dict={x: X_test_slice})
-        # print("Shape of prediction", pred_np_i.shape, pred_np_i)
+        print("Shape of predictioni", pred_np_i.shape)
+       
         # print("Shape of x, y test slice:", X_test_slice.shape, Y_test_slice.shape)
 		
         eval_loss += sess.run(loss,
                               feed_dict={x: X_test_slice, y: Y_test_slice})
         pred_np[i * gv.BATCH_SIZE:(i + 1) * gv.BATCH_SIZE, :] = pred_np_i
+		
+        print("Shape of prediction", pred_np_i.shape)
         eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)
-
-        eval_success = 100.0 * \
-            np.sum(np.argmax(pred_np, 1) ==np.argmax(Y_test,1)) / len(Y_test)
+        if(args.dataset=='uci-sensor'):
+          eval_success = 100.0 * \
+               np.sum(np.argmax(pred_np, 1) ==np.argmax(Y_test,1)) / len(Y_test)
+        else:
+          eval_success = 100.0 * \
+               np.sum(np.argmax(pred_np, 1) ==Y_test) / len(Y_test)
     # print pred_np[:100]
     # print Y_test[:100]
 
