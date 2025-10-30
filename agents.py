@@ -20,7 +20,8 @@ from utils.census_utils import census_model_1
 from utils.gas_sensor_utils import uci_sensor_model
 from utils.eval_utils import eval_minimal
 import global_vars as gv
-import streaming_utils as su
+import utils.streaming_utils as su
+from CustomRuleSGD import CustomRuleSGD
 
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
@@ -41,6 +42,18 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     shard_size = len(X_shard)
 
     pre_theta = None
+
+    if (args.T>1):
+        X_shard_t = np.array_split(X_shard, args.T)
+        Y_shard_t = np.array_split(Y_shard, args.T)
+        shard_size_t = len(X_shard_t)
+        num_steps_t = int(shard_size_t / args.B)
+		
+    if args.steps != 0:
+        num_steps = args.steps
+    else:
+        num_steps = int(args.E * shard_size / args.B)
+
 
     # with tf.device('/gpu:'+str(gpu_id)):
     if (args.dataset == 'census'):
@@ -74,15 +87,18 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         #     labels=y, logits=logits)
 		
     # prediction = tf.nn.softmax(logits)
-   
+
     if args.optimizer == 'adam':
-        lr=0.001
         optimizer = tf.train.AdamOptimizer(
             learning_rate=lr).minimize(loss)
     elif args.optimizer == 'sgd':
-        lr = 0.01
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
+    elif args.optimizer == 'strsgd':
+        optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
+	elif args.optimizer == 'strsgd':
+	        optimizer = CustomRuleSGD(learning_rate=lr).minimize(loss)
+
 
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
@@ -103,46 +119,30 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     agent_model.set_weights(theta)
     # print('loaded shared weights')
 	
-	
-    X_split_shards = np.array_split(X_shard, args.T)
-    Y_split_shards = np.array_split(Y_shard, args.T)
-    X_shard_t = X_split_shards[t]
-    Y_shard_t = Y_split_shards[t]
-    shard_size_t = len(X_shard_t)
-	
-    print("Training shard size at time t:", t, X_shard_t.shape, shard_size_t)
 
-    if args.steps != 0:
-	        num_steps = args.steps
-    else:
-	        num_steps = int(shard_size_t / args.B)
-			
+	
 
     start_offset = 0
     if args.steps is not None:
-        start_offset = (t * args.B * args.steps) % (shard_size_t - args.B)
+        start_offset = (t * args.B * args.steps) % (shard_size - args.B)
 		
     print("Number of steps, shard size and batch size:", num_steps, shard_size, args.B)
 
     for step in range(num_steps):
-		
-        offset = (start_offset + step * args.B) % (shard_size_t - args.B)
-        X_batch_t = X_shard_t[offset: (offset + args.B)]
-        Y_batch_t = Y_shard_t[offset: (offset + args.B)]
-        # print("XBATCH:", X_batch_t)
-        # print("YBATCH:", Y_batch_t)
 
-# =============================================================================
-#         offset = (start_offset + step * args.B) % (shard_size - args.B)
-#         X_batch = X_shard[offset: (offset + args.B)]
-#         Y_batch = Y_shard[offset: (offset + args.B)]
-# =============================================================================
+        offset = (start_offset + step * args.B) % (shard_size - args.B)
+        X_batch = X_shard[offset: (offset + args.B)]
+        Y_batch = Y_shard[offset: (offset + args.B)]
+        offset = (start_offset + step * args.B) % (shard_size - args.B)
+        X_batch = X_shard[offset: (offset + args.B)]
+        Y_batch = Y_shard[offset: (offset + args.B)]
+		
         if args.dataset == 'uci-sensor':
-          Y_batch_uncat =Y_batch_t
+          Y_batch_uncat =Y_batch
         else:
-          Y_batch_uncat = np.argmax(Y_batch_t, axis=1)
-        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch_t, y: Y_batch_uncat})
-        # print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
+          Y_batch_uncat = np.argmax(Y_batch, axis=1)
+        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
+        print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
 #         if step % 1000 == 0:
 #             print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
 #             # local_weights = agent_model.get_weights()
@@ -156,8 +156,9 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape)
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
-    print('LOCAL : Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
-
+# 
+    # print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
+# 
     return_dict[str(i)] = np.array(local_delta)
     return_dict["theta{}".format(i)] = np.array(local_weights)
 

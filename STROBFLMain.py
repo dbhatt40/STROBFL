@@ -1,5 +1,5 @@
 #########################
-# Purpose: Main function to perform federated training and all model poisoning attacks
+# Purpose: Main function to perform federated training
 ########################
 import warnings
 
@@ -105,8 +105,15 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 def main(args):
 	X_train, Y_train, X_test, Y_test, Y_test_uncat = data_setup()
 	print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
-	X_train_shards = np.array_split(X_train, args.k)
-	Y_train_shards = np.array_split(Y_train, args.k)
+	N=len(X_train)
+	idx=np.arrange(N)
+	num_agents_per_time = int(args.C * args.k)
+	client_idx = [idx[j::num_agents_per_time] for j in range(num_agents_per_time)]
+	X_train_shards = [X_train[ci] for ci in client_idx]
+	Y_train_shards = [Y_train[ci] for ci in client_idx]
+
+# 	X_train_shards = np.array_split(X_train, args.k)
+# 	Y_train_shards = np.array_split(Y_train, args.k)
 # =============================================================================
 # 	keys = []
 # 	for i in range(Y_train.shape[1]):

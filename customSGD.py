@@ -7,7 +7,6 @@ Created on Wed Oct  8 13:19:29 2025
 import tensorflow as tf
 import numpy as np
 
-
 class CustomRuleSGD(tf.compat.v1.train.GradientDescentOptimizer):
     def __init__(self, learning_rate=0.01, update_rule=None, **kw):
         super(CustomRuleSGD, self).__init__(learning_rate=learning_rate, **kw)
