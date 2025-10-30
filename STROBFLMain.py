@@ -22,14 +22,6 @@ import global_vars as gv
 from agents import agent, master
 from utils.eval_utils import eval_func
 
-def split_into_t_blocks(X, y, T):
-    N = len(X)
-    idx = np.arange(N)
-   
-    X_blocks = np.array_split(X[idx], T)  # nearly equal sizes
-    y_blocks = np.array_split(y[idx], T)
-    return list(zip(X_blocks, y_blocks))
-
 
 def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 			 mal_data_X=None, mal_data_Y=None):
@@ -50,14 +42,19 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 
 	r = [1 for i in range(0,args.k)]
 	
-	iteration_blocks = []
-	agent=0
-	while agent < args.k:
-	 iteration_blocks[agent] = split_into_t_blocks(X_train_shards[agent], Y_train_shards[agent], args.T)
 
+	 
+
+	agent_offsets = np.zeros((args.k,1))
+	block_size = np.zeros((args.k,1))
+	for ii in range(args.k):
+	 shard_size = X_train_shards[ii].shape[0]
+	 block_size[ii] = int(shard_size/int(args.T))
+	 print("Block size:", block_size[ii])
+	
 	while t < args.T:
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
-		print('----------Training client in time step %s---------' % t)
+		print('-----------------Training client in time step %s----------------' % t)
 		
 		lmbda = args.C*(1-args.C)
 		probs = [args.C + lmbda*ri for ri in r]
@@ -78,12 +75,23 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-				Xb, yb = iteration_blocks[i][t]
-				p = Process(target=agent, args=(i, Xb,yb, t, gpu_id, return_dict, X_test, Y_test, lr))
-# =============================================================================
-# 				p = Process(target=agent, args=(i, X_train_shards[i],
-# 													Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
-# =============================================================================
+
+				offset = int(agent_offsets[i])
+				
+				if (t != (args.T-1)):
+					bsize = int(block_size[i])
+				else:					
+					bsize = X_train_shards[i].shape[0] - offset
+				
+			
+				print("Agent, offset indexes, training block size:", i, offset, offset + bsize, bsize)
+				X_batch = X_train_shards[i][offset: (offset + bsize)]
+				Y_batch = Y_train_shards[i][offset: (offset + bsize)]
+				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
+				agent_offsets[i] = agent_offsets[i] + bsize
+				p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, X_test, Y_test, lr))
+
+
 				p.start()
 				process_list.append(p)
 				k += 1
