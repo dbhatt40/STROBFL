@@ -19,19 +19,19 @@ global data_dir
 
 def dir_name_fn(args):
     # Setting directory name to store computed weights
-    dir_name = 'weights/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
-        args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
+    dir_name = 'weights/%s/%s/k%s_C%s_B%s' % (
+        args.dataset, args.optimizer, args.k, args.C,args.B)
     # dir_name = 'weights/k{}_E{}_B{}_C{%e}_lr{}'
     output_file_name = 'output'
 
-    output_dir_name = 'output_files/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
-        args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
+    output_dir_name = 'output_files/%s/%s/k%s_C%s_B%s' % (
+        args.dataset, args.optimizer, args.k, args.C, args.B)
 
-    figures_dir_name = 'figures/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
-        args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
+    figures_dir_name = 'figures/%s/%s/k%s_C%s_B%s' % (
+        args.dataset, args.optimizer, args.k, args.C, args.B)
 
-    interpret_figs_dir_name = 'interpret_figs/%s/model_%s/%s/k%s_E%s_B%s_C%1.0e_lr%.1e' % (
-        args.dataset, args.model_num, args.optimizer, args.k, args.E, args.B, args.C, args.eta)
+    interpret_figs_dir_name = 'interpret_figs/%s/%s/k%s_C%s_B%s' % (
+        args.dataset, args.optimizer, args.k, args.C, args.B)
     
 
     current_dir = os.getcwd()
@@ -47,36 +47,6 @@ def dir_name_fn(args):
         figures_dir_name = figures_dir_name + '_' + args.gar
         interpret_figs_dir_name = interpret_figs_dir_name + '_' + args.gar
 
-    if args.lr_reduce:
-        dir_name += '_lrr'
-        output_dir_name += '_lrr'
-        figures_dir_name += '_lrr'
-
-    if args.steps is not None:
-        dir_name += '_steps' + str(args.steps)
-        output_dir_name += '_steps' + str(args.steps)
-        figures_dir_name += '_steps' + str(args.steps)
-
-    if args.mal:
-        if 'multiple' in args.mal_obj:
-            args.mal_obj = args.mal_obj + str(args.mal_num)
-        if 'dist' in args.mal_strat:
-            args.mal_strat += '_rho' + '{:.2E}'.format(args.rho)
-        if args.E != args.mal_E:
-            args.mal_strat += '_ext' + str(args.mal_E)
-        if args.mal_delay > 0:
-            args.mal_strat += '_del' + str(args.mal_delay)
-        if args.ls != 1:
-            args.mal_strat += '_ls' + str(args.ls)
-        if 'data_poison' in args.mal_strat:
-            args.mal_strat += '_reps' + str(args.data_rep)
-        if 'no_boost' in args.mal_strat or 'data_poison' in args.mal_strat:
-            args.mal_strat = args.mal_strat
-        else:
-            # if 'auto' not in args.mal_strat:
-            args.mal_strat += '_boost' + str(args.mal_boost)
-        output_file_name += '_mal_' + args.mal_obj + '_' + args.mal_strat
-        dir_name += '_mal_' + args.mal_obj + '_' + args.mal_strat
 
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
@@ -113,15 +83,13 @@ def init():
                         help="fraction of agents per time step")
     parser.add_argument("--T", type=int, default=40, help="max time_steps")
     parser.add_argument("--B", type=int, default=25, help="agent batch size")
+    parser.add_argument("--gar", type=str, default='avg', help="server aggregation rule")
 
-    parser.add_argument("--model_num", type=int,
-                        default=0, help="model to be used")
+
+    parser.add_argument("--steps", type=int, default=None,
+                        help="GD steps per agent")
     parser.add_argument("--E", type=int, default=1,
                         help="epochs for each agent")
-    parser.add_argument("--steps", type=int, default=0,
-                        help="GD steps per agent")
-    parser.add_argument("--gar", type=str, default='avg',
-                        help='Gradient Aggregation Rule')
     parser.add_argument('--iid', type=float, default=1.0,
                         help="degree to which data is independent, identically distributed (range [0,1], higher is more iid)")
 	

@@ -17,13 +17,14 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 from multiprocessing import Process, Manager
-from utils.io_utils import data_setup
+from utils.io_utils import data_setup, file_write_resultsdata
 import global_vars as gv
 from agents import agent, master
 from utils.eval_utils import eval_func
+from collections import OrderedDict
 
 
-def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
+def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, results_dict,
 			 mal_data_X=None, mal_data_Y=None):
 	# Start the training process
 	num_agents_per_time = int(args.C * args.k)
@@ -48,8 +49,9 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 		 shard_size = X_train_shards[ii].shape[0]
 		 block_size[ii] = int(shard_size/int(args.T))
 		 print("Block size:", block_size[ii])
-	
+		 
 	while t < args.T:
+		
 	# while return_dict['eval_success'] < gv.max_acc and t < args.T:
 		print('-----------------Training client in time step %s----------------' % t)
 		
@@ -85,11 +87,12 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 				   Y_batch = Y_train_shards[i][offset: (offset + bsize)]
 				   print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
 				   agent_offsets[i] = agent_offsets[i] + bsize
-				   p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, X_test, Y_test, lr))
+				   p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
 				elif (args.dataset == 'census'):
-					p = Process(target=agent, args=(i,X_train_shards[i],Y_train_shards[i], t, gpu_id, return_dict, X_test, Y_test, lr))
+					p = Process(target=agent, args=(i,X_train_shards[i],Y_train_shards[i], t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
 				p.start()
 				process_list.append(p)
+				
 				k += 1
 			for item in process_list:
 				item.join()
@@ -114,9 +117,15 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict,
 		p_eval = Process(target=eval_func, args=(
 				X_test, Y_test, t + 1, return_dict), kwargs={'global_weights': global_weights})
 		p_eval.start()
-		p_eval.join()
+		p_eval.join()		
 
 		eval_loss_list.append(return_dict['eval_loss'])
+		
+# 		print("Number of results_dict items - main :", len(results_dict))
+# 		for k, v in results_dict.items():
+# 			print(f"Results dict: {k}: {v}\n")
+		
+		file_write_resultsdata(results_dict)
 
 		t += 1
 
@@ -179,8 +188,10 @@ def main(args):
 		return_dict['eval_success'] = 0.0
 		return_dict['eval_loss'] = 0.0
 		
+		results_dict = manager.dict()
+		
 		_ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
-						 return_dict)
+						 return_dict, results_dict)
 	else:
 		manager = Manager()
 		return_dict = manager.dict()

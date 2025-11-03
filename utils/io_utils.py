@@ -4,6 +4,7 @@
 
 import global_vars as gv
 import numpy as np
+import csv
 
 from .census_utils import data_census
 from .gas_sensor_utils import data_uci_sensor
@@ -120,6 +121,22 @@ def file_writemetricsdata(write_dict, purpose='metrics_data'):
 				else:
 					f.write(str(v) + '\n')
 				d_count += 1
+		f.close()
+		
+		
+def file_write_resultsdata(results_dict, purpose='results_data'):
+	
+		filename = gv.output_dir_name + purpose + '.csv'
+		f = open(filename,'a')
+		
+		fieldnames = list(next(iter(results_dict.values())).keys())
+
+		with open(filename, "w", newline="") as f:
+			  writer = csv.DictWriter(f, fieldnames=fieldnames)
+			  writer.writeheader()  # top row = keys
+			  for client_data in results_dict.values():
+				  writer.writerow(client_data)
+		   
 		f.close()
 
 def write_matrix(mat, purpose):

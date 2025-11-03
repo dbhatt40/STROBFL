@@ -19,6 +19,7 @@ np.random.seed(777)
 from utils.census_utils import census_model_1
 from utils.gas_sensor_utils import uci_sensor_model
 from utils.eval_utils import eval_minimal
+
 import global_vars as gv
 import utils.streaming_utils as su
 from customSGD import CustomRuleSGD
@@ -27,7 +28,7 @@ from customSGD import CustomRuleSGD
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
 
 
-def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
+def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 
     args = gv.init()
@@ -44,9 +45,9 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     pre_theta = None
 
 
-		
-    if args.steps != 0:
-        num_steps = args.steps
+    num_steps = 0		
+    if args.steps is not None:
+        num_steps = int(args.steps)
     else:
         num_steps = int(args.E * shard_size / args.B)
 
@@ -111,10 +112,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     agent_model.set_weights(theta)
     # print('loaded shared weights')
 	
-
-	
-
     start_offset = 0
+	
     if args.steps is not None:
         start_offset = (t * args.B * args.steps) % (shard_size - args.B)
 		
@@ -132,6 +131,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
         else:
           Y_batch_uncat = np.argmax(Y_batch, axis=1)
         _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
+		
+	
         # print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
  
     local_weights = agent_model.get_weights()
@@ -141,8 +142,14 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, X_test, Y_test, lr=None):
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape)
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
-    print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))
-# 
+	
+    client_str = "client_" + str(i) + "_t_" + str(t)
+    results_dict[client_str] = {"t": t, "i": i, "eval_success": eval_success, "eval_loss": eval_loss}  
+    # print("Results dict:", results_dict[client_str])
+    # print("Number of results_dict items - client:", len(results_dict))
+	
+	
+    print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))#  
     return_dict[str(i)] = np.array(local_delta)
     return_dict["theta{}".format(i)] = np.array(local_weights)
 
