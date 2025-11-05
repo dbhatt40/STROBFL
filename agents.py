@@ -23,6 +23,8 @@ from utils.eval_utils import eval_minimal
 import global_vars as gv
 import utils.streaming_utils as su
 from customSGD import CustomRuleSGD
+import strobfl_learn as SFL
+
 
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
@@ -76,7 +78,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
     if (args.dataset == 'census'):
         loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=y, logits=logits))
-    elif (args.dataset == 'uci-sensor'):
+    elif (args.dataset == 'uci-sensor') and (args.optimizer != 'strobfl_learn'):
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=y, logits=logits))
 		
@@ -84,6 +86,8 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
         #     labels=y, logits=logits)
 		
     # prediction = tf.nn.softmax(logits)
+	
+    
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
@@ -91,6 +95,21 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
     elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
+    elif args.optimizer == 'strsgd':
+        optimizer = CustomRuleSGD(
+            learning_rate=lr).minimize(loss)
+    elif args.optimizer == 'strobfl_learn':
+		
+        per_example_loss = tf.nn.softmax_cross_entropy_with_logits(
+                                 labels=y, logits=logits)  # shape [B]
+        class_ids = tf.argmax(y, axis=1, output_type=tf.int32)  # shape [B]
+
+        loss_sum_per_class = tf.math.unsorted_segment_sum(per_example_loss, class_ids, gv.NUM_CLASSES)
+        counts_per_class  = tf.math.unsorted_segment_sum(tf.ones_like(per_example_loss), class_ids, gv.NUM_CLASSES)
+        per_class_loss    = tf.math.divide_no_nan(loss_sum_per_class, counts_per_class)
+        loss = tf.reduce_mean(per_class_loss)  
+        sfl_update_rule = SFL.gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema")
+        optimizer = SFL.Strobfl_learn(learning_rate=lr, update_rule=sfl_update_rule).minimize(loss)
 
 
     if args.k > 1:
