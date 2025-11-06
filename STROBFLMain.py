@@ -105,9 +105,9 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
         
 
 		if 'avg' in args.gar:
-			print('Using standard mean aggregation')
-			for k in range(num_agents_per_time):
-					global_weights += alpha_i * return_dict[str(curr_agents[k])]
+ 			print('Using standard mean aggregation')		            
+ 			for k in range(num_agents_per_time):
+				 global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
 	
 		# Saving for the next update
 		np.save(gv.dir_name + 'global_weights_t%s.npy' %

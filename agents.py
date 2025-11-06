@@ -24,6 +24,8 @@ import global_vars as gv
 import utils.streaming_utils as su
 from customSGD import CustomRuleSGD
 import strobfl_learn as SFL
+from collections import deque
+from sklearn.metrics import f1_score
 
 
 
@@ -87,7 +89,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
 		
     # prediction = tf.nn.softmax(logits)
 	
-    
+    lr=0.001
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
@@ -99,18 +101,25 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
         optimizer = CustomRuleSGD(
             learning_rate=lr).minimize(loss)
     elif args.optimizer == 'strobfl_learn':
-		
         per_example_loss = tf.nn.softmax_cross_entropy_with_logits(
-                                 labels=y, logits=logits)  # shape [B]
-        class_ids = tf.argmax(y, axis=1, output_type=tf.int32)  # shape [B]
+                                  labels=y, logits=logits)  # shape [B]
+        loss = per_example_loss
+        # class_ids = tf.argmax(y, axis=1, output_type=tf.int32)  # shape [B]
 
-        loss_sum_per_class = tf.math.unsorted_segment_sum(per_example_loss, class_ids, gv.NUM_CLASSES)
-        counts_per_class  = tf.math.unsorted_segment_sum(tf.ones_like(per_example_loss), class_ids, gv.NUM_CLASSES)
-        per_class_loss    = tf.math.divide_no_nan(loss_sum_per_class, counts_per_class)
-        loss = tf.reduce_mean(per_class_loss)  
-        sfl_update_rule = SFL.gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema")
-        optimizer = SFL.Strobfl_learn(learning_rate=lr, update_rule=sfl_update_rule).minimize(loss)
+        # loss_sum_per_class = tf.math.unsorted_segment_sum(per_example_loss, class_ids, gv.NUM_CLASSES)
+        # counts_per_class  = tf.math.unsorted_segment_sum(tf.ones_like(per_example_loss), class_ids, gv.NUM_CLASSES)
+        # per_class_loss    = tf.math.divide_no_nan(loss_sum_per_class, counts_per_class)
+        # loss = tf.reduce_mean(per_class_loss)  
+        alpha_var = tf.Variable(
+                   0.3,                 # initial α value
+                   trainable=False,
+                   dtype=tf.float32,
+                   name="alpha_var"
+            )
 
+        sfl_update_rule = SFL.gradient_update_rule_factory1(alpha_var, name_prefix="grad_ema")
+        global_step = tf.Variable(0, trainable=False, dtype=tf.int64, name='global_step')
+        optimizer = SFL.Strobfl_learn(learning_rate=lr, update_rule=sfl_update_rule).minimize(loss, global_step=global_step)
 
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
@@ -138,8 +147,15 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
 		
     print("Number of steps, shard size and batch size:", num_steps, shard_size, args.B)
 
+    K = 5  # window size
+    loss_win    = deque(maxlen=K)
+    f1m_win     = deque(maxlen=K)  # macro-F1
+    f1mi_win    = deque(maxlen=K)  # micro-F1 (optional)
+    alpha_min, alpha_max = 0.0, 0.99
+    alpha_up, alpha_down = 1.05, 0.2     # how fast α moves
+    alpha = 0.3
     for step in range(num_steps):
-
+      
         offset = (start_offset + step * args.B) % (shard_size - args.B)
         X_batch = X_shard[offset: (offset + args.B)]
         Y_batch = Y_shard[offset: (offset + args.B)]
@@ -149,10 +165,43 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
           Y_batch_uncat =Y_batch
         else:
           Y_batch_uncat = np.argmax(Y_batch, axis=1)
-        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})
-		
-	
-        # print('Agent %s, Step %s, Loss %s, offset %s' % (i, step, loss_val, offset))
+        # y_labels = np.argmax(Y_batch, axis=1)
+        # unique, counts = np.unique(y_labels, return_counts=True)
+        # for u, c in zip(unique, counts):
+        #    print(f"Class {u}: {c} samples for step {step}")
+		   
+        if args.optimizer != 'strobfl_learn':
+          _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})			
+        else:			
+          _, loss_val, step_val, logits_val = sess.run([optimizer, loss, global_step, logits], feed_dict={x: X_batch, y: Y_batch_uncat})	
+          y_true = np.argmax(Y_batch_uncat, axis=1) if Y_batch_uncat.ndim == 2 else Y_batch_uncat
+          y_pred = np.argmax(logits_val, axis=1)
+
+          f1_macro = f1_score(y_true, y_pred, average='macro', zero_division=0)
+          f1_micro = f1_score(y_true, y_pred, average='micro', zero_division=0)
+
+           # 3) update rolling windows
+          loss_val = float(np.mean(loss_val))
+          loss_win.append(loss_val)
+          f1m_win.append(f1_macro)
+          f1mi_win.append(f1_micro)
+
+            # 4) rolling stats
+          loss_lastK = float(np.mean(loss_win))
+          f1m_lastK  = float(np.mean(f1m_win))
+          f1mi_lastK = float(np.mean(f1mi_win))
+
+          # print("Loss, f1max, f1min:", loss_lastK, f1m_lastK, f1mi_lastK)
+          curr_l = float(loss_win[-1])
+          curr_f1 = float(f1m_lastK)
+          if curr_l > loss_lastK:                 # loss trending up
+            alpha = min(alpha * alpha_down, alpha_max)
+          else:                                 # loss stable/down
+            alpha = max(alpha * alpha_up, alpha_min)
+
+          sess.run(alpha_var.assign(alpha))
+
+		  # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
  
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
@@ -160,6 +209,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
 
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape)
+  
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
 	
     client_str = "client_" + str(i) + "_t_" + str(t)

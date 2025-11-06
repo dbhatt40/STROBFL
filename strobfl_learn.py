@@ -21,6 +21,7 @@ class Strobfl_learn(tf.compat.v1.train.GradientDescentOptimizer):
         return tf.cast(lr_t, var.dtype.base_dtype)
 
     def apply_gradients(self, grads_and_vars, global_step=None, name=None):
+		
         pairs = [(g, v) for g, v in grads_and_vars if g is not None]
         if not pairs:
             return tf.no_op(name or "custom_sgd_noop")
@@ -34,15 +35,18 @@ class Strobfl_learn(tf.compat.v1.train.GradientDescentOptimizer):
             # Default delta if no custom rule provided
             delta = lr_t * grad if self._update_rule is None \
                     else self._update_rule(grad, var, lr_t, global_step)
-
+     
             update_ops.append(var.assign_sub(delta, use_locking=self._use_locking))
-
+ 
         train_op = tf.group(*update_ops, name=(name or "custom_sgd_apply"))
         if global_step is not None:
             with tf.control_dependencies([train_op]):
                 return tf.compat.v1.assign_add(global_step, 1)
-        print("Training step")
         return train_op
+	
+    def minimize(self, loss, global_step=None, var_list=None, name=None):
+        grads_and_vars = self.compute_gradients(loss, var_list=var_list)
+        return self.apply_gradients(grads_and_vars, global_step=global_step, name=name)
 
 
 	
@@ -50,8 +54,52 @@ def shrink_rule(grad, var, lr_t, global_step):
       wd = 1e-4
       return lr_t * (grad + wd * var)
 
+def gradient_update_rule_factory1(alpha=0.2, name_prefix="grad_avg"):
+    """
+    Returns an update_rule(grad, var, lr_t, global_step) such that:
+      avg_grad_t = ((t-1)*avg_grad_{t-1} + grad) / t
+      new_grad   = (1 - alpha)*grad + alpha*avg_grad_t
+      delta      = lr_t * new_grad
+    """
+    slots = {}          # holds average gradient slot per variable
+    steps = tf.Variable(0, trainable=False, dtype=tf.int64, name="grad_avg_step")
 
-def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
+    def _slot_for(var):
+        key = var.ref()
+        if key not in slots:
+            slots[key] = tf.Variable(
+                tf.zeros_like(var),
+                trainable=False,
+                name=f"{name_prefix}/{var.op.name.replace(':','_')}"
+            )
+        return slots[key]
+
+    def update_rule(grad, var, lr_t, global_step):
+        avg_slot = _slot_for(var)
+
+        # Increment step counter (shared)
+        new_step = tf.compat.v1.assign_add(steps, 1)
+        step_f = tf.cast(new_step, var.dtype.base_dtype)
+
+        # Running average of all past gradients
+        avg_new = tf.compat.v1.assign(
+                     avg_slot,
+                     ((step_f - 1.0) / step_f) * avg_slot +
+                     (1.0 / step_f) * grad
+                   )
+
+        # Blended gradient
+        with tf.control_dependencies([avg_new]):
+            new_grad = (1.0 - alpha) * grad + alpha * avg_new
+            delta = lr_t * new_grad
+            return tf.identity(delta, name="grad_blend_delta")
+
+    update_rule.avg_slots = slots
+    update_rule.step_var = steps
+    return update_rule
+
+
+def gradient_update_rule_factory2(alpha=0.2, name_prefix="grad_ema"):
     """
     Returns an update_rule(grad, var, lr_t, global_step) that:
       m_t = alpha_t * m_{t-1} + (1 - alpha) * grad

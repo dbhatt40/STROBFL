@@ -45,6 +45,9 @@ def data_uci_sensor():
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 	
+    unique, counts = np.unique(y_test, return_counts=True)
+    for u, c in zip(unique, counts):
+       print(f"Class {u}: {c} samples")
 	
     if y_train.min() == 1:
 		   y_train = y_train - 1
@@ -67,7 +70,23 @@ def uci_sensor_model():
  	model = Model(inputs=main_input, outputs=main_output)
  	return model
 
-
+def update_per_label_stats(features, labels):
+    """
+    features: [B, D]  numpy array of feature vectors
+    labels:   [B]     class indices 0..NUM_CLASSES-1
+    """
+    global avg_vecs, counts
+    for c in np.unique(labels):
+        mask = (labels == c)
+        n_new = np.sum(mask)
+        if n_new == 0:
+            continue
+        feat_new = np.mean(features[mask], axis=0)
+        n_old = counts[c]
+        # weighted running average
+        avg_vecs[c] = (avg_vecs[c]*n_old + feat_new*n_new) / (n_old + n_new)
+        counts[c] += n_new
+    return avg_vecs, counts
 
 
 
