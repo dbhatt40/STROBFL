@@ -24,8 +24,8 @@ def dir_name_fn(args):
     # dir_name = 'weights/k{}_E{}_B{}_C{%e}_lr{}'
     output_file_name = 'output'
 
-    output_dir_name = 'output_files/%s/%s/k%s_C%s_B%s' % (
-        args.dataset, args.optimizer, args.k, args.C, args.B)
+    output_dir_name = 'output_files/%s/%s/T%s_k%s_C%s_B%s' % (
+        args.dataset, args.optimizer, args.T, args.k, args.C, args.B)
 
     figures_dir_name = 'figures/%s/%s/k%s_C%s_B%s' % (
         args.dataset, args.optimizer, args.k, args.C, args.B)
@@ -164,7 +164,15 @@ def init():
         max_agents_per_gpu = 6
         mem_frac = 0.05
         moving_rate = 1.0
-    
+    elif args.dataset == 'air-quality':     
+        DATA_DIM = 13
+        BATCH_SIZE = 10
+        WINDOW_SIZE = 50
+        NUM_CLASSES = 1
+        max_acc = 85.0
+        max_agents_per_gpu = 6
+        mem_frac = 0.05
+        moving_rate = 1.0    
 
     if max_agents_per_gpu < 1:
         max_agents_per_gpu = 1

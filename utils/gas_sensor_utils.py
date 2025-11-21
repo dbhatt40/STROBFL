@@ -20,6 +20,9 @@ from keras.utils import np_utils
 
 import global_vars as gv
 
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 def data_uci_sensor():
 	
     data_path =  "/content/STROBFL/data/gas_sensor/gas_drift_all_batches.csv"
@@ -88,5 +91,14 @@ def update_per_label_stats(features, labels):
         counts[c] += n_new
     return avg_vecs, counts
 
+def write_rbf_history(drift_history):
+    drift_history = np.asarray(drift_history, dtype=float).reshape(-1, 1)
 
+# Create a DataFrame with one column
+    df_drift = pd.DataFrame(drift_history, columns=["Overall_Drift"])
+    df_drift.insert(0, "Batch", np.arange(1, len(df_drift) + 1))
+
+# Write to CSV
+    df_drift.to_csv("/content/STROBFL/output_files/drift_history.csv", index=False)
+    return
 

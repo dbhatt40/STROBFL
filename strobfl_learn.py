@@ -4,8 +4,13 @@ Created on Wed Oct  8 13:19:29 2025
 
 @author: Divya
 """
-import tensorflow as tf
+
 import numpy as np
+from sklearn.metrics import f1_score
+import matplotlib.pyplot as plt
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 class Strobfl_learn(tf.compat.v1.train.GradientDescentOptimizer):
     def __init__(self, learning_rate=0.01, update_rule=None, **kw):
@@ -175,4 +180,100 @@ def exp_decay_weights(n, *, alpha=None, half_life=None, rate=None,
             w = w / s
      return w.astype(dtype)
 
+def detect_concept_drift(alpha,loss_win, f1m_win, f1mi_win):
+        alpha_min, alpha_max = 0.0, 0.99
+        alpha_up, alpha_down = 1.05, 0.2     # how fast α moves
 
+        loss_lastK = float(np.mean(loss_win))
+        f1m_lastK  = float(np.mean(f1m_win))
+        f1mi_lastK = float(np.mean(f1mi_win))
+
+        # print("Loss, f1max, f1min:", loss_lastK, f1m_lastK, f1mi_lastK)
+        curr_l = float(loss_win[-1])
+        curr_f1 = float(f1m_lastK)
+        if curr_l > loss_lastK:                 # loss trending up
+          alpha = min(alpha * alpha_down, alpha_max)
+        else:                                 # loss stable/down
+          alpha = max(alpha * alpha_up, alpha_min)
+
+        return alpha
+	
+	
+def init_stats(num_classes: int, feat_dim: int, PER_LABEL_STATS):
+    PER_LABEL_STATS["sum"] = np.zeros((num_classes, feat_dim), dtype=np.float64)
+    PER_LABEL_STATS["count"] = np.zeros((num_classes,), dtype=np.int64)
+    PER_LABEL_STATS["means"] = np.zeros((num_classes, feat_dim), dtype=np.float64)
+
+def update_per_label_stats_batch(X_batch: np.ndarray, y_batch, num_classes: int, PER_LABEL_STATS):
+    """
+    X_batch: (B, D) float
+    y_batch: either (B,) int labels OR (B, C) one-hot
+    num_classes: C
+    """
+    if X_batch.ndim != 2:
+        raise ValueError("X_batch must be 2D (B, D)")
+    B, D = X_batch.shape
+
+    # Convert labels to integer class ids if one-hot
+    if isinstance(y_batch, np.ndarray) and y_batch.ndim == 2:
+        y_int = np.argmax(y_batch, axis=1)
+    else:
+        y_int = np.asarray(y_batch).reshape(-1)
+    if y_int.shape[0] != B:
+        raise ValueError("y_batch length must match X_batch rows")
+
+    # One-hot for aggregation: (B, C)
+    one_hot = np.eye(num_classes, dtype=np.float64)[y_int]            # (B, C)
+
+    # Per-label counts this batch: (C,)
+    batch_counts = one_hot.sum(axis=0).astype(np.int64)
+
+    # Per-label feature sums this batch: (C, D) = (C, B) @ (B, D) via transpose
+    # Equivalent to one_hot.T @ X_batch
+    batch_sums = one_hot.T.dot(X_batch.astype(np.float64))            # (C, D)
+
+    # Update global cumulative sums and counts
+    PER_LABEL_STATS["sum"] += batch_sums
+    PER_LABEL_STATS["count"] += batch_counts
+
+    # Safe means (avoid div-by-zero)
+    nonzero = PER_LABEL_STATS["count"] > 0
+    means = np.zeros_like(PER_LABEL_STATS["sum"])
+    means[nonzero] = PER_LABEL_STATS["sum"][nonzero] / PER_LABEL_STATS["count"][nonzero, None]
+    PER_LABEL_STATS["means"] = means
+
+    # Also return this-batch-only stats if you need them immediately
+    batch_means = np.zeros_like(batch_sums)
+    nz = batch_counts > 0
+    batch_means[nz] = batch_sums[nz] / batch_counts[nz, None]
+    # print("In update stats:", type(batch_means))
+
+    return batch_counts, batch_means  # shapes: (C,), (C, D)
+
+def rbf_drift(prev_means, curr_means, sigma=1.0):
+    """
+    Compute RBF-based drift between label means from two batches.
+
+    Args:
+        prev_means: np.ndarray of shape (C, D)
+        curr_means: np.ndarray of shape (C, D)
+        sigma: RBF bandwidth
+
+    Returns:
+        drift_per_label: np.ndarray of shape (C,)
+        drift_overall: float
+    """
+    if prev_means is None:
+        return None, None
+
+    prev_means = np.asarray(prev_means, dtype=np.float64)
+    curr_means = np.asarray(curr_means, dtype=np.float64)
+    diff = curr_means - prev_means        # (C, D)
+    sqdist = np.sum(diff ** 2, axis=1)    # (C,)
+    rbf_sim = np.exp(-sqdist / (2 * sigma ** 2))   # similarity [0,1]
+    drift = 1 - rbf_sim  
+    drift_mean = float(drift.mean())                # 0 = identical, 1 = maximal drift
+    return drift, drift_mean
+
+
+	

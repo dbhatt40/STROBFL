@@ -17,20 +17,25 @@ import numpy as np
 tf.set_random_seed(777)
 np.random.seed(777)
 from utils.census_utils import census_model_1
-from utils.gas_sensor_utils import uci_sensor_model
+from utils.gas_sensor_utils import uci_sensor_model, write_rbf_history
 from utils.eval_utils import eval_minimal
 
 import global_vars as gv
 import utils.streaming_utils as su
 from customSGD import CustomRuleSGD
 import strobfl_learn as SFL
-from collections import deque
+from collections import deque, defaultdict
 from sklearn.metrics import f1_score
 
 
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
 
+PER_LABEL_STATS = {
+    "sum": None,       # shape: [C, D]
+    "count": None,     # shape: [C]
+    "means": None      # shape: [C, D] (derived)
+}
 
 def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
@@ -90,6 +95,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
     # prediction = tf.nn.softmax(logits)
 	
     lr=0.001
+    alpha = 0.3
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
@@ -100,7 +106,7 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
     elif args.optimizer == 'strsgd':
         optimizer = CustomRuleSGD(
             learning_rate=lr).minimize(loss)
-    elif args.optimizer == 'strobfl_learn':
+    elif (args.dataset == 'uci-sensor') and (args.optimizer == 'strobfl_learn'):
         per_example_loss = tf.nn.softmax_cross_entropy_with_logits(
                                   labels=y, logits=logits)  # shape [B]
         loss = per_example_loss
@@ -110,8 +116,24 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
         # counts_per_class  = tf.math.unsorted_segment_sum(tf.ones_like(per_example_loss), class_ids, gv.NUM_CLASSES)
         # per_class_loss    = tf.math.divide_no_nan(loss_sum_per_class, counts_per_class)
         # loss = tf.reduce_mean(per_class_loss)  
+		
         alpha_var = tf.Variable(
-                   0.3,                 # initial α value
+                   alpha,                 # initial α value
+                   trainable=False,
+                   dtype=tf.float32,
+                   name="alpha_var"
+            )
+
+        sfl_update_rule = SFL.gradient_update_rule_factory1(alpha_var, name_prefix="grad_ema")
+        global_step = tf.Variable(0, trainable=False, dtype=tf.int64, name='global_step')
+        optimizer = SFL.Strobfl_learn(learning_rate=lr, update_rule=sfl_update_rule).minimize(loss, global_step=global_step)
+    elif (args.dataset == 'census') and (args.optimizer == 'strobfl_learn'):
+        per_example_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                            labels=y, logits=logits))
+        loss = per_example_loss
+       		
+        alpha_var = tf.Variable(
+                   alpha,                 # initial α value
                    trainable=False,
                    dtype=tf.float32,
                    name="alpha_var"
@@ -147,13 +169,17 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
 		
     print("Number of steps, shard size and batch size:", num_steps, shard_size, args.B)
 
-    K = 5  # window size
+    K = 3  # window size
     loss_win    = deque(maxlen=K)
     f1m_win     = deque(maxlen=K)  # macro-F1
     f1mi_win    = deque(maxlen=K)  # micro-F1 (optional)
-    alpha_min, alpha_max = 0.0, 0.99
-    alpha_up, alpha_down = 1.05, 0.2     # how fast α moves
-    alpha = 0.3
+    
+    C = gv.NUM_CLASSES
+    D = gv.DATA_DIM
+    SFL.init_stats(C, D, PER_LABEL_STATS)
+    sigma = 0.5
+    prev_means = None
+    rbf_drift_history = []
     for step in range(num_steps):
       
         offset = (start_offset + step * args.B) % (shard_size - args.B)
@@ -165,44 +191,40 @@ def agent(i, X_shard, Y_shard, t, gpu_id, return_dict, results_dict, X_test, Y_t
           Y_batch_uncat =Y_batch
         else:
           Y_batch_uncat = np.argmax(Y_batch, axis=1)
-        # y_labels = np.argmax(Y_batch, axis=1)
-        # unique, counts = np.unique(y_labels, return_counts=True)
-        # for u, c in zip(unique, counts):
-        #    print(f"Class {u}: {c} samples for step {step}")
-		   
-        if args.optimizer != 'strobfl_learn':
+        
+        counts_s, means_s = SFL.update_per_label_stats_batch(X_batch, Y_batch, C, PER_LABEL_STATS)
+
+        if prev_means is not None:
+           drift_vec, drift_mean = SFL.rbf_drift(prev_means, means_s, sigma)
+           rbf_drift_history.append(drift_mean)
+           # print("Drift mean shape:", drift_mean)
+           # print("Step, RBF Drift:", step, drift_mean)
+           # for c,d in enumerate(drift_vec):
+           #     print("Step:C:D:", step, c,d)
+        prev_means = means_s.copy()
+		
+        if(args.optimizer != 'strobfl_learn' or args.dataset != 'uci-sensor'):
           _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch_uncat})			
         else:			
           _, loss_val, step_val, logits_val = sess.run([optimizer, loss, global_step, logits], feed_dict={x: X_batch, y: Y_batch_uncat})	
+        
+
           y_true = np.argmax(Y_batch_uncat, axis=1) if Y_batch_uncat.ndim == 2 else Y_batch_uncat
           y_pred = np.argmax(logits_val, axis=1)
 
           f1_macro = f1_score(y_true, y_pred, average='macro', zero_division=0)
           f1_micro = f1_score(y_true, y_pred, average='micro', zero_division=0)
 
-           # 3) update rolling windows
+            # 3) update rolling windows
           loss_val = float(np.mean(loss_val))
           loss_win.append(loss_val)
           f1m_win.append(f1_macro)
           f1mi_win.append(f1_micro)
-
-            # 4) rolling stats
-          loss_lastK = float(np.mean(loss_win))
-          f1m_lastK  = float(np.mean(f1m_win))
-          f1mi_lastK = float(np.mean(f1mi_win))
-
-          # print("Loss, f1max, f1min:", loss_lastK, f1m_lastK, f1mi_lastK)
-          curr_l = float(loss_win[-1])
-          curr_f1 = float(f1m_lastK)
-          if curr_l > loss_lastK:                 # loss trending up
-            alpha = min(alpha * alpha_down, alpha_max)
-          else:                                 # loss stable/down
-            alpha = max(alpha * alpha_up, alpha_min)
-
+          alpha = SFL.detect_concept_drift(alpha,loss_win, f1m_win, f1mi_win)		  
           sess.run(alpha_var.assign(alpha))
 
 		  # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
- 
+    write_rbf_history(rbf_drift_history)
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights

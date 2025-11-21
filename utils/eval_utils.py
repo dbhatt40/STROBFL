@@ -1,3 +1,4 @@
+
 #########################
 # Purpose: Useful functions for evaluating a model on test data
 ########################
@@ -85,18 +86,19 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
         pred_np[i * gv.BATCH_SIZE:(i + 1) * gv.BATCH_SIZE, :] = pred_np_i
 		
         # print("Shape of prediction", pred_np_i.shape)
-        eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)
-        if(args.dataset=='uci-sensor'):
-          eval_success = 100.0 * \
-               np.sum(np.argmax(pred_np, 1) ==np.argmax(Y_test,1)) / len(Y_test)
-        else:
-          eval_success = 100.0 * \
-               np.sum(np.argmax(pred_np, 1) ==Y_test) / len(Y_test)
+        
+    
     # print pred_np[:100]
     # print Y_test[:100]
 
     sess.close()
-
+    eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)   
+    if(args.dataset=='uci-sensor'):
+         eval_success = 100.0 * \
+              np.sum(np.argmax(pred_np, 1) ==np.argmax(Y_test,1)) / len(Y_test)
+    else:
+         eval_success = 100.0 * \
+              np.sum(np.argmax(pred_np, 1) ==Y_test) / len(Y_test)
     if return_dict is not None:
         return_dict['success_thresh'] = eval_success
 
