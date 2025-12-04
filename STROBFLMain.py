@@ -17,15 +17,14 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 from multiprocessing import Process, Manager
-from utils.io_utils import data_setup, file_write_resultsdata
+from utils.io_utils import file_write_resultsdata
 import global_vars as gv
 from agents import agent, master
-
 from utils.eval_utils import eval_func
-from collections import OrderedDict
-from utils.air_quality_utils import data_airquality
-from aq_agents import aq_agent
-from utils.air_quality_streaming_utils import PerStationTumblingCoordinator
+from utils.air_quality_utils import data_air_quality
+from synclass1_train import synclass1_train_fn
+from aq_train import aq_train_fn
+
 
 
 def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, results_dict,
@@ -34,7 +33,7 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
 	num_agents_per_time = int(args.C * args.k)
 	simul_agents = gv.num_gpus * gv.max_agents_per_gpu
 	simul_num = min(num_agents_per_time, simul_agents)
-	alpha_i = 1.0 / args.k
+
 	agent_indices = np.arange(args.k)
 	print("In agent train, X_train_shard:", len(X_train_shards), X_train_shards[0].shape)
 	print("In agent train, Y_train_shard:", len(Y_train_shards), Y_train_shards[0].shape)
@@ -136,109 +135,16 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
 	return t
 
 
-def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
-	# Start the training process
-	num_agents_per_time = int(args.C * args.k)
-	simul_agents = gv.num_gpus * gv.max_agents_per_gpu
-	simul_num = min(num_agents_per_time, simul_agents)
-	agent_indices = np.arange(args.k)
 
-
-	t = 0
-	eval_loss_list = []
-	lr = args.eta
-	param_dict = dict()
-	param_dict['offset'] = [0]
-	param_dict['shape'] = []
-
-	r = [1 for i in range(0,args.k)]
-	
-	NUM_AGENTS_ROUND = args.k
-	train_offsets = np.zeros(NUM_AGENTS_ROUND, dtype=np.int32)
-		 
-	while t < args.T:
-		
-		print('-----------------Training client in server round %s----------------' % t)
-	
-		lmbda = args.C*(1-args.C)
-		probs = [args.C + lmbda*ri for ri in r]
-		probs_sum = sum(probs)
-		probs = [elem/probs_sum for elem in probs]
-
-		process_list = []
-		curr_agents = np.random.choice(agent_indices, num_agents_per_time,
-									   replace=False,p=probs)
-		print('Set of agents chosen in this round: %s' % curr_agents)
-		
-	       
-		k = 0
-		agents_left = 1e4
-
-		while k < num_agents_per_time:
-			true_simul = min(simul_num, agents_left)
-			print('Training %s agents' % true_simul)
-			for l in range(true_simul):
-				gpu_index = int(l / gv.max_agents_per_gpu)
-				gpu_id = gv.gpu_ids[gpu_index]
-				i = curr_agents[k]
-				X_batch, Y_batch = X_Y_train_shards[i]        
-				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
-				p = Process(target=aq_agent, args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
-				p.start()
-				process_list.append(p)
-				
-				k += 1
-			for item in process_list:
-				item.join()
-			agents_left = num_agents_per_time - k
-			print('Agents left:%s' % agents_left)
-
-		print('Joined all processes for time step %s' % t)
-
-		global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
-        
-
-		if 'avg' in args.gar:
- 			print('Using standard mean aggregation')		            
- 			for k in range(num_agents_per_time):
-				 global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
-	
-		# Saving for the next update
-		np.save(gv.dir_name + 'global_weights_t%s.npy' %
-				(t + 1), global_weights)
-
-		# Evaluate global weight
-		p_eval = Process(target=eval_func, args=(
-				X_test, Y_test, t + 1, return_dict), kwargs={'global_weights': global_weights})
-		p_eval.start()
-		p_eval.join()		
-
-		eval_loss_list.append(return_dict['eval_loss'])
-	
-		file_write_resultsdata(results_dict)
-
-		t += 1
-
-	return t
 
 def main(args):
-	if(args.dataset != 'air-quality'):
-	  X_train, Y_train, X_test, Y_test, Y_test_uncat = data_setup()
-	  print("IN MAIN X_test and Y_test shape:", X_test.shape, Y_test.shape)
-	  N=len(X_train)
-	  idx=np.arange(N)
-	  num_agents= int(args.k)
-	  client_idx = [idx[j::num_agents] for j in range(num_agents)]
-	  X_train_shards = [X_train[ci] for ci in client_idx]
-	  Y_train_shards = [Y_train[ci] for ci in client_idx]
+	if(args.dataset == 'synthetic-class1'):
+	   X_Y_train_shards, X_test, Y_test = data_air_quality()	  
 	elif (args.dataset == 'air-quality'):
-	  X_Y_train_shards, X_test, Y_test = data_airquality()
-	
+	   X_Y_train_shards, X_test, Y_test = data_air_quality()
+	   
 	if args.train:
-		if (args.dataset == 'air-quality'):
-			p = Process(target='aq-master')
-		else:
-		    p = Process(target='master')
+		p = Process(target=master)
 
 		p.start()
 		p.join()
@@ -249,29 +155,10 @@ def main(args):
 		return_dict['eval_loss'] = 0.0
 		
 		results_dict = manager.dict()
-		if(args.dataset != 'air-quality'):		
-		    _ = train_fn(X_train_shards, Y_train_shards, X_test, Y_test_uncat,
-						 return_dict, results_dict)
-		elif (args.dataset == 'air-quality'):
-			_ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
-	else:
-		manager = Manager()
-		return_dict = manager.dict()
-		return_dict['eval_success'] = 0.0
-		return_dict['eval_loss'] = 0.0
-
-		for t in range(args.T):
- 			if not os.path.exists(gv.dir_name + 'global_weights_t%s.npy' % t):
-				 print('No directory found for iteration %s' % t)
-				 break
- 			p_eval = Process(target=eval_func, args=(
- 					X_test, Y_test_uncat, t, return_dict))
-
- 			p_eval.start()
- 			p_eval.join()
-
-		
-
+		if (args.dataset == 'air-quality'):
+ 			_ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
+		elif (args.dataset == 'synthetic-class1'):
+ 			_ = synclass1_train_fn(return_dict, results_dict)
 
 if __name__ == "__main__":
 	args = gv.init()

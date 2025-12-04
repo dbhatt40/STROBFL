@@ -18,6 +18,7 @@ tf.set_random_seed(777)
 np.random.seed(777)
 from utils.census_utils import census_model_1
 from utils.gas_sensor_utils import uci_sensor_model, write_rbf_history
+from utils.air_quality_utils import airquality_model
 from utils.eval_utils import eval_minimal
 
 import global_vars as gv
@@ -265,7 +266,9 @@ def master():
         global_model = census_model_1()
     elif args.dataset == 'uci-sensor':
         global_model = uci_sensor_model()
-
+    elif args.dataset == 'air-quality':
+        global_model = airquality_model()
+		
     global_weights_np = global_model.get_weights()
     np.save(gv.dir_name + 'global_weights_t0.npy', global_weights_np)
     print("[server] save global weights t0")

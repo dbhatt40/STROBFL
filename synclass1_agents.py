@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Nov 23 13:40:33 2025
+
+@author: Divya
+"""
+
 #########################
 # Purpose: Mimics a benign agent in the federated learning setting and sets up the master agent 
 ########################
@@ -18,12 +25,10 @@ tf.set_random_seed(777)
 np.random.seed(777)
 
 from utils.eval_utils import eval_minimal
-from  utils.air_quality_utils import airquality_model
 import global_vars as gv
-
 from customSGD import CustomRuleSGD
+from synthetic_class1_utils import synthetic_class1_model
 
-# gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
 
 PER_LABEL_STATS = {
     "sum": None,       # shape: [C, D]
@@ -31,7 +36,7 @@ PER_LABEL_STATS = {
     "means": None      # shape: [C, D] (derived)
 }
 
-def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
 
@@ -45,16 +50,17 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
 
     shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
     pre_theta = None
-  		
-    x = tf.placeholder(shape=(None,gv.DATA_DIM), dtype=tf.float32)
-    y_true = tf.placeholder(shape=(None,gv.NUM_CLASSES), dtype=tf.float32)
+	
+    agent_model = synthetic_class1_model()
+    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
+    y = tf.placeholder(shape=[None],dtype=tf.int64, name="y")
+    logits = agent_model(x)
 
-    agent_model = airquality_model()
-    y_pred = agent_model(x)
-    loss = tf.reduce_mean(tf.math.squared_difference(y_true, y_pred))
-   	
+    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+           labels=y, logits=logits)) 	
+	   	
     lr=0.001
-    alpha = 0.3
+
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
@@ -97,8 +103,8 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
         offset = (start_offset + step * args.B) 
         X_batch = x_batch[offset: (offset + args.B)]
         Y_batch = y_batch[offset: (offset + args.B)]
-        Y_batch = Y_batch.astype('float32').reshape(-1, 1) 
-        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y_true: Y_batch})	
+
+        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch})	
         start_offset = offset
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
     b_new_offset = b_start_offset + train_size
@@ -124,23 +130,6 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (i, t), local_delta)
 
-
-
     return
 
 
-def aq_master():
-    tf.keras.backend.set_learning_phase(1)
-    print('Initializing server models')
-    config = tf.ConfigProto(gpu_options=gv.gpu_options)
-    config.gpu_options.allow_growth = True
-    sess = tf.Session(config=config)
-    tf.keras.backend.set_session(sess)
-    sess.run(tf.global_variables_initializer())
-	
-    global_model = airquality_model()
-
-    global_weights_np = global_model.get_weights()
-    np.save(gv.dir_name + 'global_weights_t0.npy', global_weights_np)
-    print("[server] save global weights t0")
-    return

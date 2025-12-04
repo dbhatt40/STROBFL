@@ -143,37 +143,28 @@ def init():
 
     global max_agents_per_gpu
 
-    global IMAGE_ROWS, IMAGE_COLS, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM
+    global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, C,k,T,NUM_DRIFTED
 
     global max_acc
 
-    if args.dataset == 'census':
-        DATA_DIM = 104
-        BATCH_SIZE = 50
-        NUM_CLASSES = 2
-        max_acc = 85.0
-        max_agents_per_gpu = 6
-        mem_frac = 0.05
-        moving_rate = 1.0
-    elif args.dataset == 'uci-sensor':     
-        DATA_DIM = 128
-        BATCH_SIZE = 10
-        WINDOW_SIZE = 50
-        NUM_CLASSES = 6
-        max_acc = 85.0
-        max_agents_per_gpu = 6
-        mem_frac = 0.05
-        moving_rate = 1.0
-    elif args.dataset == 'air-quality':     
+    if args.dataset == 'air-quality':     
         DATA_DIM = 13
-        BATCH_SIZE = 10
+        BATCH_SIZE = 50
         WINDOW_SIZE = 50
         NUM_CLASSES = 1
         max_acc = 85.0
-        max_agents_per_gpu = 6
+        max_agents_per_gpu = 2
         mem_frac = 0.05
         moving_rate = 1.0    
-
+    elif args.dataset == 'synthetic-class1':     
+       DATA_DIM = 2
+       NUM_CLASSES = 4
+       WINDOW_SIZE = 50
+       NUM_DRIFTED = 2
+       max_acc = 85.0
+       max_agents_per_gpu = 2
+       mem_frac = 0.05
+       moving_rate = 1.0    
     if max_agents_per_gpu < 1:
         max_agents_per_gpu = 1
 

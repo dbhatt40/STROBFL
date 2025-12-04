@@ -22,13 +22,14 @@ import global_vars as gv
 
 import os
 from typing import Dict, Tuple, Optional, Iterable
+from sklearn.preprocessing import StandardScaler
 
 
 def split_clients_xy(
     client_train_dfs: Dict[int, pd.DataFrame],
     *,
     label_col: str,
-    drop_extra_cols: Optional[Iterable[str]] = ("timestamp", "station_id"),
+    drop_extra_cols: Optional[Iterable[str]] = ("datetime", "station_id"),
     as_numpy: bool = True,
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     """
@@ -119,7 +120,7 @@ def data_air_quality(
         Mapping from station_id -> training DataFrame (remaining rows).
     """
     server_test_frac = 0.10
-    timestamp_col = "timestamp"
+    timestamp_col = "datetime"
     station_col = "station_id"
     parse_dates = True
     drop_na = True
@@ -128,7 +129,7 @@ def data_air_quality(
 
     # Load
     parse_cols = [timestamp_col] if parse_dates else None
-    csv_path = "/content/STROBFL/data/air_quality/AirQuality_clean.csv"  
+    csv_path = "/content/STROBFL/data/air_quality/AirQuality_Clean.csv"  
     df = pd.read_csv(csv_path, parse_dates=parse_cols)
 
     # Basic checks / cleanup
@@ -171,36 +172,52 @@ def data_air_quality(
             # sid is pandas Int64; convert to int for dict key
             client_train_dfs[int(sid)] = g.reset_index(drop=True)
 
-    # Optionally write to disk
-    if output_dir is not None:
-        os.makedirs(output_dir, exist_ok=True)
-        server_test_df.to_csv(os.path.join(output_dir, "server_test.csv"), index=False)
-        for sid, g in client_train_dfs.items():
-            g.to_csv(os.path.join(output_dir, f"client_train_{sid}.csv"), index=False)
-	
+# =============================================================================
+#     # Optionally write to disk
+#     if output_dir is not None:
+#         os.makedirs(output_dir, exist_ok=True)
+#         server_test_df.to_csv(os.path.join(output_dir, "server_test.csv"), index=False)
+#         for sid, g in client_train_dfs.items():
+#             g.to_csv(os.path.join(output_dir, f"client_train_{sid}.csv"), index=False)
+# 	
+# =============================================================================
     label_col = "PM2.5"   # or whatever your target column is
-    drop_cols = ["timestamp", "station_id"]  # metadata columns not used as features
+    drop_cols = [timestamp_col, station_col]  # metadata columns not used as features
 
     y_test = server_test_df[label_col].values               # shape (n_samples,)
     X_test = server_test_df.drop(columns=drop_cols + [label_col]).values  # shape (n_samples, n_features)
     client_xy = split_clients_xy(client_train_dfs,
         label_col="PM2.5",          # change to your actual target column
-        drop_extra_cols=("timestamp", "station_id"),
+        drop_extra_cols=(timestamp_col, station_col),
         as_numpy=True
     )
+    x_train,y_train = client_xy[0]
+    X_scaler = StandardScaler().fit(x_train)
+    y_scaler = StandardScaler().fit(y_train.reshape(-1,1))
+	
+    X_test_scaler = X_scaler. transform(X_test)
+    y_test_scaler = y_scaler.transform(y_test.reshape(-1,1))
 
-    return client_xy, X_test, y_test
+
+    scaled_client_xy={}
+    for sid, (X_train,Y_train) in client_xy.items():
+        X_train_scaled = X_scaler.fit_transform(X_train)
+        Y_train_scaled = y_scaler.fit_transform(Y_train.reshape(-1,1))		
+        scaled_client_xy[sid] = (X_train_scaled,Y_train_scaled)
+    return scaled_client_xy, X_test_scaler, y_test_scaler
 
 
 def airquality_model():
 	inp = Input(shape=(gv.DATA_DIM,), name='main_input')
 	
-	x = layers.Conv1D(64, 3, padding="causal", activation="relu")(inp)
-	x = layers.BatchNormalization()(x)
-	x = layers.Conv1D(64, 3, padding="causal", activation="relu", dilation_rate=2)(x)  # 2nd layer
-	x = layers.GlobalAveragePooling1D()(x)
-	out = layers.Dense(gv.NUM_CLASSES)(x)
-
+	x = layers.Dense(128, activation="relu")(inp)
+	x = layers.Dropout(0.2)(x)
+	
+	x = layers.Dense(64, activation="relu")(x)
+	x = layers.Dropout(0.2)(x)
+	
+	out = layers.Dense(1, activation="linear")(x)  # regression output
 	model = Model(inp, out)
+	 	
 
 	return model
