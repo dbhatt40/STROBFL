@@ -20,6 +20,7 @@ from utils.census_utils import census_model_1
 from utils.gas_sensor_utils import uci_sensor_model, write_rbf_history
 from utils.air_quality_utils import airquality_model
 from utils.eval_utils import eval_minimal
+from utils.synclass1_utils import synclass1_model
 
 import global_vars as gv
 import utils.streaming_utils as su
@@ -262,13 +263,11 @@ def master():
     tf.keras.backend.set_session(sess)
     sess.run(tf.global_variables_initializer())
 
-    if args.dataset == 'census':
-        global_model = census_model_1()
-    elif args.dataset == 'uci-sensor':
-        global_model = uci_sensor_model()
-    elif args.dataset == 'air-quality':
+    if args.dataset == 'air-quality':
         global_model = airquality_model()
-		
+    elif (args.dataset == 'synthetic-class1'):
+       global_model =  synclass1_model()
+        
     global_weights_np = global_model.get_weights()
     np.save(gv.dir_name + 'global_weights_t0.npy', global_weights_np)
     print("[server] save global weights t0")

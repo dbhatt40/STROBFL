@@ -8,6 +8,7 @@ Created on Sun Nov 23 15:01:55 2025
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, Model
+import global_vars as gv
 
 class DriftStream4Class:
     """
@@ -236,13 +237,13 @@ def federated_mixed_drift_stream_with_queues(
 
 
 def synclass1_model():
-    inp = layers.Input(shape=(NUM_DIM,), name="main_input")
+    inp = layers.Input(shape=(gv.NUM_DIM,), name="main_input")
 
     x = layers.Dense(32, activation='relu')(inp)
     x = layers.Dense(32, activation='relu')(x)
 
     # Logits output
-    out = layers.Dense(NUM_CLASSES)(x)
+    out = layers.Dense(gv.NUM_CLASSES)(x)
 
     model = Model(inputs=inp, outputs=out)
     return model

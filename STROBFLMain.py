@@ -69,7 +69,9 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
 		print('Set of agents chosen: %s' % curr_agents)
 
 		k = 0
+		bsize = gv.BATCH_SIZE
 		agents_left = 1e4
+
 		while k < num_agents_per_time:
 			true_simul = min(simul_num, agents_left)
 			print('training %s agents' % true_simul)
@@ -77,22 +79,14 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
+				offset = agent_offsets[i] 
+				print("Agent, offset indexes, training block size:", i, offset, offset + bsize, bsize)
+				X_batch = X_train_shards[i][offset: (offset + bsize)]
+				Y_batch = Y_train_shards[i][offset: (offset + bsize)]
+				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
+				agent_offsets[i] = agent_offsets[i] + bsize
+				p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
 				
-				if (args.dataset == 'uci-sensor'):
-				   offset = int(agent_offsets[i])				
-				   if (t != (args.T-1)):
-					   bsize = int(block_size[i])
-				   else:					
-					   bsize = X_train_shards[i].shape[0] - offset				
-			
-				   print("Agent, offset indexes, training block size:", i, offset, offset + bsize, bsize)
-				   X_batch = X_train_shards[i][offset: (offset + bsize)]
-				   Y_batch = Y_train_shards[i][offset: (offset + bsize)]
-				   print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
-				   agent_offsets[i] = agent_offsets[i] + bsize
-				   p = Process(target=agent, args=(i, X_batch,Y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
-				elif (args.dataset == 'census'):
-					p = Process(target=agent, args=(i,X_train_shards[i],Y_train_shards[i], t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
 				p.start()
 				process_list.append(p)
 				
@@ -135,30 +129,27 @@ def train_fn(X_train_shards, Y_train_shards, X_test, Y_test, return_dict, result
 	return t
 
 
-
-
 def main(args):
-	if(args.dataset == 'synthetic-class1'):
-	   X_Y_train_shards, X_test, Y_test = data_air_quality()	  
-	elif (args.dataset == 'air-quality'):
-	   X_Y_train_shards, X_test, Y_test = data_air_quality()
-	   
-	if args.train:
-		p = Process(target=master)
+    if args.train:
+            p = Process(target=master)
+            p.start()
+            p.join()
+    
+            manager = Manager()
+            return_dict = manager.dict()
+            return_dict['eval_success'] = 0.0
+            return_dict['eval_loss'] = 0.0    		
+            results_dict = manager.dict()
 
-		p.start()
-		p.join()
-
-		manager = Manager()
-		return_dict = manager.dict()
-		return_dict['eval_success'] = 0.0
-		return_dict['eval_loss'] = 0.0
-		
-		results_dict = manager.dict()
-		if (args.dataset == 'air-quality'):
- 			_ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
-		elif (args.dataset == 'synthetic-class1'):
- 			_ = synclass1_train_fn(return_dict, results_dict)
+# =============================================================================
+#     if(args.dataset == 'synthetic-class1'):
+#             _train_shards, X_test, Y_test = data_air_quality()	
+#             _ = synclass1_train_fn(return_dict, results_dict)
+#     elif (args.dataset == 'air-quality'):
+#             X_Y_train_shards, X_test, Y_test = data_air_quality()
+#             _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
+# =============================================================================
+         			
 
 if __name__ == "__main__":
 	args = gv.init()
