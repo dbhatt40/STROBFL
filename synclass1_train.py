@@ -21,37 +21,35 @@ tf.get_logger().setLevel(logging.ERROR)
 from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
-
-
 from utils.eval_utils import eval_func
-from aq_agents import aq_agent
-from synthetic_class1_utils import federated_mixed_drift_stream_with_queues
+from utils.synclass1_utils import federated_mixed_drift_stream_with_queues
 from synclass1_agents import synclass1_agent
 
 
 def synclass1_train_fn(return_dict, results_dict):
 	# Start the training process
-	
+    T = gv.T
+    C = gv.C
+    k = gv.k
 
+    num_agents_per_time = int(C*k)
+    simul_agents = gv.num_gpus * gv.max_agents_per_gpu
+    simul_num = min(num_agents_per_time, simul_agents)
+    agent_indices = np.arange(k)
 	
-	num_agents_per_time = int(gv.C * gv.k)
-	simul_agents = gv.num_gpus * gv.max_agents_per_gpu
-	simul_num = min(num_agents_per_time, simul_agents)
-	agent_indices = np.arange(gv.k)
-	
-	t = 0
-	eval_loss_list = []
-	lr = 1e3
-	param_dict = dict()
-	param_dict['offset'] = [0]
-	param_dict['shape'] = []
+    round_idx = 0
+    eval_loss_list = []
+    lr = 1e3
+    param_dict = dict()
+    param_dict['offset'] = [0]
+    param_dict['shape'] = []
 
-	r = [1 for i in range(0,gv.k)]
+    r = [1 for i in range(0,k)]
 	
 	
-	gen = federated_mixed_drift_stream_with_queues(
-    num_rounds=gv.T,
-    num_clients=gv.k,
+    gen = federated_mixed_drift_stream_with_queues(
+    num_rounds=T,
+    num_clients=k,
     batch_size=gv.WINDOW_SIZE,
     num_drifted_clients=gv.NUM_DRIFTED,
     drift_clients_mode="independent",  # or "shared"
@@ -64,75 +62,64 @@ def synclass1_train_fn(return_dict, results_dict):
     )
 	
 	
-	for round_idx, client_batches, test_batch in gen:
-		print("Round:", round_idx)
+    for round_idx, client_batches, test_batch in gen:
+        print("Round:", round_idx)
 	
+        X_test, y_test, t_test = test_batch
+        print("  Test:", X_test.shape, y_test.shape, t_test.shape)
+        # print("-" * 40)        print('-----------------Training client in server round %s----------------' % t)
 
-		X_test, y_test, t_test = test_batch
-		print("  Test:", X_test.shape, y_test.shape, t_test.shape)
-		print("-" * 40)
+        lmbda = C*(1-C)
+        probs = [C + lmbda*ri for ri in r]
+        probs_sum = sum(probs)
+        probs = [elem/probs_sum for elem in probs]
 
-	
-		print('-----------------Training client in server round %s----------------' % t)
-	
-
-		lmbda = gv.C*(1-gv.C)
-		probs = [gv.C + lmbda*ri for ri in r]
-		probs_sum = sum(probs)
-		probs = [elem/probs_sum for elem in probs]
-
-		process_list = []
-		curr_agents = np.random.choice(agent_indices, num_agents_per_time,
+        process_list = []
+        curr_agents = np.random.choice(agent_indices, num_agents_per_time,
 									   replace=False,p=probs)
-		print('Set of agents chosen in this round: %s' % curr_agents)
+        print('Set of agents chosen in this round: %s' % curr_agents)
 		
-	       
-		k = 0
-		agents_left = 1e4
-
-		while k < num_agents_per_time:
-			true_simul = min(simul_num, agents_left)
-			print('Training %s agents' % true_simul)
-			for l in range(true_simul):
-				gpu_index = int(l / gv.max_agents_per_gpu)
-				gpu_id = gv.gpu_ids[gpu_index]
-				i = curr_agents[k]
-				X_batch, y_batch, t_batch= client_batches[i]     
-				print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
-				p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
-				p.start()
-				process_list.append(p)
-				k += 1	
+        agents_left = 1e4
+        activeclient = 0
+        while activeclient < num_agents_per_time:
+            true_simul = min(simul_num, agents_left)
+            print('Training %s agents' % true_simul)
+            for l in range(true_simul):
+                gpu_index = int(l / gv.max_agents_per_gpu)
+                gpu_id = gv.gpu_ids[gpu_index]
+                i = curr_agents[k]
+                X_batch, y_batch, t_batch= client_batches[i]     
+                print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
+                p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                p.start()
+                process_list.append(p)
+                activeclient += 1	
 				 
-			for item in process_list:
-				item.join()
-			agents_left = num_agents_per_time - k
-			print('Agents left:%s' % agents_left)
+            for item in process_list:
+                item.join()
+            agents_left = num_agents_per_time - activeclient
+            print('Agents left:%s' % agents_left)
 
-		print('Joined all processes for time step %s' % t)
+        print('Joined all processes for time step %s' % round_idx)
 
-		global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
-        
-
-		if 'avg' in gv.gar:
- 			print('Using standard mean aggregation')		            
- 			for k in range(num_agents_per_time):
- 				 global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
+        global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
+        for k in range(num_agents_per_time):
+             global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
  	
 		# Saving for the next update
-		np.save(gv.dir_name + 'global_weights_t%s.npy' %
-				(t + 1), global_weights)
+        np.save(gv.dir_name + 'global_weights_t%s.npy' %
+				(round_idx + 1), global_weights)
 
 		# Evaluate global weight
-		p_eval = Process(target=eval_func, args=(
-				X_test, y_test, t + 1, return_dict), kwargs={'global_weights': global_weights})
-		p_eval.start()
-		p_eval.join()		
+        p_eval = Process(target=eval_func, args=(
+				X_test, y_test, round_idx + 1, return_dict), kwargs={'global_weights': global_weights})
+        p_eval.start()
+        p_eval.join()		
 
-		eval_loss_list.append(return_dict['eval_loss'])
+        eval_loss_list.append(return_dict['eval_loss'])
  	
-		file_write_resultsdata(results_dict)
+        file_write_resultsdata(results_dict)
 
-		t += 1
 
-	return t
+
+    return round_idx

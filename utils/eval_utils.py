@@ -16,9 +16,10 @@ from .census_utils import census_model_1
 from .gas_sensor_utils import uci_sensor_model
 from .air_quality_utils import airquality_model
 import global_vars as gv
+
 from .io_utils import file_write
 from collections import OrderedDict
-from synthetic_class1_utils import synthetic_class1_model
+from .synclass1_utils import synclass1_model
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.99)
 
@@ -30,7 +31,7 @@ def eval_setup(global_weights):
     global_weights_np = global_weights
 
     if args.dataset == 'synthetic-class1':
-        global_model = synthetic_class1_model()
+        global_model = synclass1_model()
         x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
         y = tf.placeholder(shape=[None],dtype=tf.int64, name="y")
         logits = global_model(x)
@@ -77,7 +78,7 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
     eval_loss = 0.0
 	
     num_samples = len(X_test)
-    num_batches = int(np.ceil(num_samples / gv.BATCH_SIZE))
+    num_batches = int(np.ceil(num_samples /gv.BATCH_SIZE))
     total_count = 0
     eval_loss = 0.0    
     for i in range(num_batches):
@@ -95,17 +96,15 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
           eval_loss += loss_val*batch_size 
           pred_np[start:end,:] = pred_np_i
   
-# =============================================================================
-#         else:
-#          pred_np_i = sess.run(prediction, feed_dict={x: X_test_slice})
-#          # print("Shape of predictioni", pred_np_i.shape)       
-#          # print("Shape of x, y test slice:", X_test_slice.shape, Y_test_slice.shape)		
-#          eval_loss += sess.run(loss,
-#                               feed_dict={x: X_test_slice, y: Y_test_slice})
-#          pred_np[i * gv.BATCH_SIZE:(i + 1) * gv.BATCH_SIZE, :] = pred_np_i		
-#         # print("Shape of prediction", pred_np_i.shape)
-#          eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)   
-# =============================================================================
+        else:
+         pred_np_i = sess.run(prediction, feed_dict={x: X_test_slice})
+         # print("Shape of predictioni", pred_np_i.shape)       
+         # print("Shape of x, y test slice:", X_test_slice.shape, Y_test_slice.shape)		
+         eval_loss += sess.run(loss,
+                              feed_dict={x: X_test_slice, y: Y_test_slice})
+         pred_np[i * gv.BATCH_SIZE:(i + 1) * gv.BATCH_SIZE, :] = pred_np_i		
+        # print("Shape of prediction", pred_np_i.shape)
+         eval_loss = eval_loss / (len(X_test) / gv.BATCH_SIZE)   
     
     eval_loss = eval_loss / total_count if total_count > 0 else float('nan')
     sess.close()

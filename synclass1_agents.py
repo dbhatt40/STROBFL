@@ -26,8 +26,9 @@ np.random.seed(777)
 
 from utils.eval_utils import eval_minimal
 import global_vars as gv
+
 from customSGD import CustomRuleSGD
-from synthetic_class1_utils import synthetic_class1_model
+from utils.synclass1_utils import synclass1_model
 
 
 PER_LABEL_STATS = {
@@ -36,7 +37,7 @@ PER_LABEL_STATS = {
     "means": None      # shape: [C, D] (derived)
 }
 
-def synclass1_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
 
@@ -51,7 +52,7 @@ def synclass1_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, 
     shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
     pre_theta = None
 	
-    agent_model = synthetic_class1_model()
+    agent_model = synclass1_model()
     x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
     y = tf.placeholder(shape=[None],dtype=tf.int64, name="y")
     logits = agent_model(x)
@@ -92,23 +93,23 @@ def synclass1_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, 
     # print('loaded shared weights')
  	
 
-    b_start_offset = train_offsets[i]
+
     batch_size = len(x_batch)
-    train_size = (batch_size-b_start_offset)/(args.T-t)
-   	
-    num_steps = int(train_size/args.B)
-    start_offset = b_start_offset
+
+    B=20
+    num_steps = int(batch_size/B)
+    start_offset = 0
  	
     for step in range(num_steps):
-        offset = (start_offset + step * args.B) 
-        X_batch = x_batch[offset: (offset + args.B)]
-        Y_batch = y_batch[offset: (offset + args.B)]
+        offset = (start_offset + step * B) 
+        X_batch = x_batch[offset: (offset + B)]
+        Y_batch = y_batch[offset: (offset + B)]
 
         _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch})	
         start_offset = offset
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
-    b_new_offset = b_start_offset + train_size
-    train_offsets[i] = b_new_offset
+
+
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights

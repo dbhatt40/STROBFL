@@ -6,9 +6,9 @@ Created on Sun Nov 23 15:01:55 2025
 """
 
 import numpy as np
-import tensorflow as tf
 from tensorflow.keras import layers, Model
 import global_vars as gv
+
 
 class DriftStream4Class:
     """
@@ -33,8 +33,171 @@ class DriftStream4Class:
         self.imbalance_factor = float(imbalance_factor)
         self.samples_per_cycle = int(samples_per_cycle)
 
-        # Bias to enforce class imbalance
-        self.class_prior_
+        # Keep a global counter for "time"
+        self.global_step = 0
+
+        # Class prior bias (same as stationary stream)
+        self.class_prior_bias = np.array([2.0, 0.5, -0.5, -1.0])
+
+        # Define several regimes (A,B,C,D) for concept + covariate drift
+        self.mu_list, self.cov_list, self.W_list, self.b_list = self._build_regimes()
+
+    def _build_regimes(self):
+        """
+        Define 4 different regimes for covariate + concept drift.
+        You can tweak these if you want stronger/weaker drift.
+        """
+        # Means
+        mu_A = np.array([0.0, 0.0])
+        mu_B = np.array([2.0, 0.0])
+        mu_C = np.array([0.0, 2.0])
+        mu_D = np.array([-2.0, -1.0])
+
+        # Covariances
+        cov_A = np.array([[1.0, 0.2],
+                          [0.2, 1.0]])
+        cov_B = np.array([[1.5, -0.3],
+                          [-0.3, 1.0]])
+        cov_C = np.array([[0.8, 0.0],
+                          [0.0, 1.2]])
+        cov_D = np.array([[1.0, 0.5],
+                          [0.5, 1.5]])
+
+        # Linear classifiers (W,b) for each regime
+        W_A = np.array([
+            [1.0,  0.6],   # class 0
+            [-1.0, 0.3],   # class 1
+            [0.4, -1.0],   # class 2
+            [0.6,  1.0],   # class 3
+        ])
+        b_A = np.array([0.0, -0.5, 0.1, 0.2])
+
+        W_B = np.array([
+            [0.5,  1.0],
+            [-0.8, 0.2],
+            [1.0, -0.5],
+            [-0.3, -1.0],
+        ])
+        b_B = np.array([0.2, 0.0, -0.3, 0.4])
+
+        W_C = np.array([
+            [1.2, -0.2],
+            [-0.5, 1.0],
+            [0.2, -1.2],
+            [0.8,  0.8],
+        ])
+        b_C = np.array([-0.2, 0.3, 0.0, 0.1])
+
+        W_D = np.array([
+            [0.8,  0.8],
+            [-1.0, -0.1],
+            [0.1, -0.8],
+            [0.3,  1.2],
+        ])
+        b_D = np.array([0.3, -0.4, 0.2, 0.0])
+
+        mu_list  = [mu_A,  mu_B,  mu_C,  mu_D]
+        cov_list = [cov_A, cov_B, cov_C, cov_D]
+        W_list   = [W_A,   W_B,   W_C,   W_D]
+        b_list   = [b_A,   b_B,   b_C,   b_D]
+
+        return mu_list, cov_list, W_list, b_list
+
+    def _phase_and_mix(self, t):
+        """
+        Map global step t into:
+          - a base regime index (0..3)
+          - a mixing coefficient lambda in [0,1] for gradual transitions.
+
+        We split one cycle into 4 quarters and smoothly interpolate
+        near the boundaries for gradual drift.
+        """
+        # position within cycle in [0,1)
+        cycle_pos = (t % self.samples_per_cycle) / float(self.samples_per_cycle)
+
+        # 4 equal segments: [0,0.25), [0.25,0.5), [0.5,0.75), [0.75,1.0)
+        quarter = 0.25
+        idx = int(cycle_pos // quarter)  # 0,1,2,3
+        idx_next = (idx + 1) % 4
+
+        # Within each quarter, use the last alpha fraction as a transition region
+        # for gradual mixing between regime idx and idx_next.
+        local_pos = (cycle_pos - idx * quarter) / quarter  # in [0,1)
+        transition_width = 0.4  # fraction of quarter used for transition
+
+        if local_pos < (1.0 - transition_width):
+            # mostly pure regime idx
+            mix = 0.0
+        else:
+            # linearly mix from idx to idx_next
+            # local_pos in [1 - transition_width, 1) -> mix in [0,1)
+            mix = (local_pos - (1.0 - transition_width)) / transition_width
+            mix = float(np.clip(mix, 0.0, 1.0))
+
+        return idx, idx_next, mix
+
+    def _current_params(self, t):
+        """
+        Get (mu, cov, W, b) at time t, with possible interpolation between regimes.
+        """
+        idx, idx_next, mix = self._phase_and_mix(t)
+
+        mu0,  mu1  = self.mu_list[idx],  self.mu_list[idx_next]
+        cov0, cov1 = self.cov_list[idx], self.cov_list[idx_next]
+        W0,   W1   = self.W_list[idx],   self.W_list[idx_next]
+        b0,   b1   = self.b_list[idx],   self.b_list[idx_next]
+
+        if mix == 0.0:
+            return mu0, cov0, W0, b0
+
+        # simple linear interpolation; for cov we do element-wise (not PSD-guaranteed but OK for sim)
+        mu = (1.0 - mix) * mu0  + mix * mu1
+        cov = (1.0 - mix) * cov0 + mix * cov1
+        W = (1.0 - mix) * W0    + mix * W1
+        b = (1.0 - mix) * b0    + mix * b1
+
+        return mu, cov, W, b
+
+    def sample_one(self):
+        """
+        Draw a single (x, y, t_global) sample from the drifting process.
+        """
+        t_global = float(self.global_step)
+        self.global_step += 1
+
+        mu, cov, W, b = self._current_params(t_global)
+
+        # Covariate drift: Gaussian parameters change over time
+        x = self.rng.multivariate_normal(mu, cov)
+
+        # Concept drift: classifier parameters W,b change over time
+        logits = W @ x + b
+
+        # Add noise and imbalance
+        logits = logits + self.rng.normal(0.0, self.noise_std, size=4)
+        logits = logits + self.imbalance_factor * self.class_prior_bias
+
+        # Class label
+        y = int(np.argmax(logits))
+
+        return x.astype(np.float32), y, t_global
+
+    def sample_batch(self, batch_size):
+        """
+        Draw a batch of samples: X shape (batch_size, 2), y shape (batch_size,), t shape (batch_size,)
+        """
+        X = np.zeros((batch_size, 2), dtype=np.float32)
+        y = np.zeros(batch_size, dtype=np.int64)
+        t = np.zeros(batch_size, dtype=np.float32)
+
+        for i in range(batch_size):
+            xi, yi, ti = self.sample_one()
+            X[i] = xi
+            y[i] = yi
+            t[i] = ti
+
+        return X, y, t
+
 
 
 class StationaryStream4Class:
@@ -237,7 +400,7 @@ def federated_mixed_drift_stream_with_queues(
 
 
 def synclass1_model():
-    inp = layers.Input(shape=(gv.NUM_DIM,), name="main_input")
+    inp = layers.Input(shape=(gv.DATA_DIM,), name="main_input")
 
     x = layers.Dense(32, activation='relu')(inp)
     x = layers.Dense(32, activation='relu')(x)

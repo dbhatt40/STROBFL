@@ -141,14 +141,13 @@ def main(args):
             return_dict['eval_loss'] = 0.0    		
             results_dict = manager.dict()
 
-# =============================================================================
-#     if(args.dataset == 'synthetic-class1'):
-#             _train_shards, X_test, Y_test = data_air_quality()	
-#             _ = synclass1_train_fn(return_dict, results_dict)
-#     elif (args.dataset == 'air-quality'):
-#             X_Y_train_shards, X_test, Y_test = data_air_quality()
-#             _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
-# =============================================================================
+
+    if(args.dataset == 'synthetic-class1'):
+            _ = synclass1_train_fn(return_dict, results_dict)
+    elif (args.dataset == 'air-quality'):
+            X_Y_train_shards, X_test, Y_test = data_air_quality()
+            _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, return_dict, results_dict)
+
          			
 
 if __name__ == "__main__":
