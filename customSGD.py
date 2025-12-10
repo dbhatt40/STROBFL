@@ -51,15 +51,14 @@ def shrink_rule(grad, var, lr_t, global_step):
       return lr_t * (grad + wd * var)
 
 
-def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
+def gradient_update_rule_factory(alpha_var, name_prefix="grad_ema"):
     """
     Returns an update_rule(grad, var, lr_t, global_step) that:
-      m_t = alpha_t * m_{t-1} + (1 - alpha) * grad
-      u_t = (1 - mix) * grad + mix * m_t
+      m_t = alpha * m_{t-1} + (1 - alpha) * grad
+      u_t = (1 - alpha) * grad + alpha * m_t
       delta = lr_t * u_t
-   
+    where alpha is a tf.Variable you can change from Python.
     """
-    # One non-trainable slot per variable, created lazily on first use.
     slots = {}  # maps var.ref() -> tf.Variable (EMA slot)
 
     def _slot_for(var):
@@ -72,33 +71,25 @@ def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
         return slots[key]
 
     def update_rule(grad, var, lr_t, global_step):
-        # Handle IndexedSlices (sparse) the simple way by densifying.
-        # If you have huge embeddings, implement a scatter version instead.
         if isinstance(grad, tf.IndexedSlices):
             grad = tf.convert_to_tensor(grad)
 
         m = _slot_for(var)
-        alpha_t = tf.convert_to_tensor(alpha, dtype=var.dtype.base_dtype)
-       
+
+        # Cast alpha_var to match var dtype
+        alpha_t = tf.cast(alpha_var, var.dtype.base_dtype)
 
         # m_t = alpha*m + (1-alpha)*grad
         m_t = m.assign(alpha_t * m + (1.0 - alpha_t) * grad)
 
-        # use control dependency so the EMA update happens before using m_t
         with tf.control_dependencies([m_t]):
             upd = (1.0 - alpha_t) * grad + alpha_t * m_t
-            delta = lr_t * upd         # THIS is the amount to subtract from var
-           
-           # print("In gradient update rule - gradient")
-           # print(grad)
-            #print("In gradient update rule - delta")
-            #print(delta)
-            
+            delta = lr_t * upd
             return tf.identity(delta, name="ema_blend_delta")
-  
-    # expose slots if you want to read them later (optional)
+
     update_rule.ema_slots = slots
     return update_rule
+
 
 
 def exp_decay_weights(n, *, alpha=None, half_life=None, rate=None,

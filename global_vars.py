@@ -143,7 +143,7 @@ def init():
 
     global max_agents_per_gpu
 
-    global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, C,k,T,NUM_DRIFTED
+    global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, C,k,T,NUM_DRIFTED, gar
 
     global max_acc
 

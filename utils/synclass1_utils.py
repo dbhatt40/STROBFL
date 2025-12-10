@@ -9,7 +9,6 @@ import numpy as np
 from tensorflow.keras import layers, Model
 import global_vars as gv
 
-
 class DriftStream4Class:
     """
     4-class synthetic data generator with:
@@ -108,11 +107,7 @@ class DriftStream4Class:
         Map global step t into:
           - a base regime index (0..3)
           - a mixing coefficient lambda in [0,1] for gradual transitions.
-
-        We split one cycle into 4 quarters and smoothly interpolate
-        near the boundaries for gradual drift.
         """
-        # position within cycle in [0,1)
         cycle_pos = (t % self.samples_per_cycle) / float(self.samples_per_cycle)
 
         # 4 equal segments: [0,0.25), [0.25,0.5), [0.5,0.75), [0.75,1.0)
@@ -120,17 +115,12 @@ class DriftStream4Class:
         idx = int(cycle_pos // quarter)  # 0,1,2,3
         idx_next = (idx + 1) % 4
 
-        # Within each quarter, use the last alpha fraction as a transition region
-        # for gradual mixing between regime idx and idx_next.
         local_pos = (cycle_pos - idx * quarter) / quarter  # in [0,1)
         transition_width = 0.4  # fraction of quarter used for transition
 
         if local_pos < (1.0 - transition_width):
-            # mostly pure regime idx
             mix = 0.0
         else:
-            # linearly mix from idx to idx_next
-            # local_pos in [1 - transition_width, 1) -> mix in [0,1)
             mix = (local_pos - (1.0 - transition_width)) / transition_width
             mix = float(np.clip(mix, 0.0, 1.0))
 
@@ -150,7 +140,6 @@ class DriftStream4Class:
         if mix == 0.0:
             return mu0, cov0, W0, b0
 
-        # simple linear interpolation; for cov we do element-wise (not PSD-guaranteed but OK for sim)
         mu = (1.0 - mix) * mu0  + mix * mu1
         cov = (1.0 - mix) * cov0 + mix * cov1
         W = (1.0 - mix) * W0    + mix * W1
@@ -199,7 +188,6 @@ class DriftStream4Class:
         return X, y, t
 
 
-
 class StationaryStream4Class:
     """
     Stationary 4-class generator:
@@ -237,7 +225,6 @@ class StationaryStream4Class:
         return W, b
 
     def sample_one(self):
-        # t_global can exist just for completeness, but does not change anything
         t_global = float(self.global_step)
         self.global_step += 1
 
@@ -264,6 +251,7 @@ class StationaryStream4Class:
 
         return X, y, t
 
+
 def federated_mixed_drift_stream_with_queues(
     num_rounds,
     num_clients,
@@ -276,6 +264,8 @@ def federated_mixed_drift_stream_with_queues(
     imbalance_factor=0.0,
     samples_per_cycle=10000,
     random_state=None,
+    queue_maxlen=None,
+    var_threshold_factor=1.0,
 ):
     """
     Federated stream where:
@@ -284,33 +274,28 @@ def federated_mixed_drift_stream_with_queues(
       - drifted clients can either share one drift pattern ("shared")
         or have independent drift streams ("independent").
 
-    Parameters
-    ----------
-    num_rounds : int
-        Number of FL rounds (T).
-    num_clients : int
-        Total number of clients (N).
-    batch_size : int
-        Local training batch per client per round (B).
-    num_drifted_clients : int
-        Number of clients that have drift (0 <= num_drifted_clients <= num_clients).
-    drift_clients_mode : {"independent", "shared"}
-        "independent": each drifted client has its own DriftStream4Class.
-        "shared": all drifted clients share one DriftStream4Class.
-    arrival_rate : float
-        Fraction of batch_size that arrives as new samples in the queue each round.
-    test_batch_size : int
-        Number of test samples per round.
-    noise_std, imbalance_factor, samples_per_cycle, random_state :
-        Passed into the stream constructors.
+    NEW:
+      - Each client has a fixed-size queue (queue_maxlen, default = batch_size).
+      - For each client we keep per-label stats for samples currently in the queue:
+          * mean[label] (vector in R^2)
+          * variance[label] (per-dimension)
+          * count[label]
+      - When arrival_rate > 1, each new sample is admitted/evicted according to:
+          1) If label is new in queue => insert, evict oldest sample overall.
+          2) Else if distance^2 from label-mean > var_threshold_factor * avg_variance[label]
+             => insert, evict oldest sample of same label (fallback: oldest overall).
+          3) Else discard the sample.
     """
 
     assert 0 <= num_drifted_clients <= num_clients, "num_drifted_clients must be between 0 and num_clients"
 
     rng = np.random.default_rng(random_state)
+    num_labels = 4       # classes 0..3
+    feat_dim = 2         # x is 2-D
+    if queue_maxlen is None:
+        queue_maxlen = batch_size
 
     # Decide which client IDs are drifted.
-    # Here we simply take the first num_drifted_clients; you can randomize if you want.
     drifted_client_ids = list(range(num_drifted_clients))
     stationary_client_ids = list(range(num_drifted_clients, num_clients))
 
@@ -346,8 +331,7 @@ def federated_mixed_drift_stream_with_queues(
             random_state=rng.integers(1_000_000) + 10_000 + cid,
         )
 
-    # One global test stream: you can choose drifted or stationary.
-    # Here I use a drifting stream for tests.
+    # One global test stream: drifting
     test_stream = DriftStream4Class(
         noise_std=noise_std,
         imbalance_factor=imbalance_factor,
@@ -357,7 +341,108 @@ def federated_mixed_drift_stream_with_queues(
 
     # Per-client queues of (x, y, t)
     queues = [[] for _ in range(num_clients)]
+
+    # NEW: per-client per-label queue stats
+    # shape: (num_clients, num_labels, feat_dim)
+    label_sum   = [np.zeros((num_labels, feat_dim), dtype=np.float64) for _ in range(num_clients)]
+    label_sumsq = [np.zeros((num_labels, feat_dim), dtype=np.float64) for _ in range(num_clients)]
+    label_count = [np.zeros(num_labels, dtype=np.int64)               for _ in range(num_clients)]
+
+    def _stats_insert(cid, x, y):
+        """Update per-label stats for insertion."""
+        label_sum[cid][y]   += x
+        label_sumsq[cid][y] += x * x
+        label_count[cid][y] += 1
+
+    def _stats_remove(cid, x, y):
+        """Update per-label stats for removal."""
+        label_sum[cid][y]   -= x
+        label_sumsq[cid][y] -= x * x
+        label_count[cid][y] -= 1
+
+    def _label_mean_var(cid, y):
+        """
+        Return (mean_vec, avg_variance_scalar) for label y
+        based on samples currently in client's queue.
+        """
+        c = label_count[cid][y]
+        if c <= 0:
+            return None, None
+        s  = label_sum[cid][y]
+        ss = label_sumsq[cid][y]
+        mean = s / float(c)
+        var_vec = ss / float(c) - mean * mean
+        var_vec = np.maximum(var_vec, 0.0)  # numerical safety
+        avg_var = float(np.mean(var_vec))
+        return mean, avg_var
+
+    def _force_insert(cid, sample):
+        """
+        Sliding-window insert: if queue is full, evict oldest overall.
+        Always inserts the new sample, updating stats accordingly.
+        """
+        q = queues[cid]
+        x, y, t = sample
+        if len(q) >= queue_maxlen:
+            x_old, y_old, t_old = q.pop(0)
+            _stats_remove(cid, x_old, y_old)
+        q.append((x, y, t))
+        _stats_insert(cid, x, y)
+
+    def _insert_with_policy(cid, sample):
+        """
+        Insert or discard a sample based on the user's rules
+        when arrival_rate > 1.
+        """
+        q = queues[cid]
+        x, y, t = sample
+        x = x.astype(np.float64)  # use float64 for stable stats
+
+        # Case 1: label not present yet in queue -> insert, delete oldest overall if full
+        if label_count[cid][y] == 0:
+            if len(q) >= queue_maxlen:
+                x_old, y_old, t_old = q.pop(0)
+                _stats_remove(cid, x_old, y_old)
+            q.append((x.astype(np.float32), y, t))
+            _stats_insert(cid, x, y)
+            return True
+
+        # Label already present: compute distance from mean and compare to avg variance
+        mean_y, avg_var_y = _label_mean_var(cid, y)
+
+        # If for some reason no stats (shouldn't happen), just fallback to force insert
+        if mean_y is None or avg_var_y is None:
+            _force_insert(cid, (x.astype(np.float32), y, t))
+            return True
+
+        diff = x - mean_y
+        dist2 = float(np.mean(diff * diff))  # average squared distance across dims
+
+        # If avg_var_y is zero (or tiny), treat as all new => admit
+        threshold = var_threshold_factor * (avg_var_y if avg_var_y > 1e-12 else 1e-12)
+
+        # Case 2: distance from mean exceeds threshold -> insert, remove oldest sample with same label
+        if dist2 > threshold:
+            if len(q) >= queue_maxlen:
+                idx_to_remove = None
+                for idx, (x_old, y_old, t_old) in enumerate(q):
+                    if y_old == y:
+                        idx_to_remove = idx
+                        break
+                if idx_to_remove is None:
+                    idx_to_remove = 0  # fallback
+                x_old, y_old, t_old = q.pop(idx_to_remove)
+                _stats_remove(cid, x_old, y_old)
+
+            q.append((x.astype(np.float32), y, t))
+            _stats_insert(cid, x, y)
+            return True
+
+        # Case 3: variance threshold not exceeded -> discard sample
+        return False
+
     arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
+    use_policy = arrival_rate > 1.0
 
     for r in range(num_rounds):
         client_batches = []
@@ -369,23 +454,28 @@ def federated_mixed_drift_stream_with_queues(
             # 1) New arrivals for this client
             if arrivals_per_round > 0:
                 X_new, y_new, t_new = stream.sample_batch(arrivals_per_round)
-                q.extend(
-                    (X_new[i], int(y_new[i]), float(t_new[i]))
-                    for i in range(arrivals_per_round)
-                )
+                for i in range(arrivals_per_round):
+                    sample = (X_new[i], int(y_new[i]), float(t_new[i]))
+                    if use_policy:
+                        _insert_with_policy(cid, sample)
+                    else:
+                        _force_insert(cid, sample)
 
             # 2) Ensure we have at least batch_size samples
             if len(q) < batch_size:
                 missing = batch_size - len(q)
                 X_extra, y_extra, t_extra = stream.sample_batch(missing)
-                q.extend(
-                    (X_extra[i], int(y_extra[i]), float(t_extra[i]))
-                    for i in range(missing)
-                )
+                for i in range(missing):
+                    sample = (X_extra[i], int(y_extra[i]), float(t_extra[i]))
+                    # For "topping up", just force insert (we need the batch).
+                    _force_insert(cid, sample)
 
-            # 3) Pop batch for this client
+            # 3) Pop batch for this client (and update stats accordingly)
             batch_samples = q[:batch_size]
             del q[:batch_size]
+
+            for x_b, y_b, t_b in batch_samples:
+                _stats_remove(cid, x_b, y_b)
 
             X_c = np.stack([s[0] for s in batch_samples], axis=0).astype(np.float32)
             y_c = np.array([s[1] for s in batch_samples], dtype=np.int64)
@@ -410,3 +500,97 @@ def synclass1_model():
 
     model = Model(inputs=inp, outputs=out)
     return model
+
+
+
+def _flatten_weights(weights_list):
+    """Flatten a list/tuple of numpy arrays into a single 1D vector."""
+    return np.concatenate([w.ravel() for w in weights_list])
+
+def aggregate_with_rbf(
+    global_weights,
+    client_weights_list,
+    client_num_samples,
+    gamma=1.0,
+    eps=1e-12,
+):
+    """
+    Hybrid FedAvg + RBF-similarity aggregation.
+
+    Parameters
+    ----------
+    global_weights : list of np.ndarray
+        Current global model weights (e.g., from np.load(..., allow_pickle=True)).
+    client_weights_list : list of (list of np.ndarray)
+        client_weights_list[k] is the list of layer-weight arrays for client k,
+        same shapes as global_weights.
+    client_num_samples : array-like of shape (K,)
+        Number of training samples used by each client k.
+    gamma : float
+        RBF kernel width parameter. Similarity = exp(-gamma * ||u_i - u_j||^2),
+        where u_i is the flattened update vector for client i.
+    eps : float
+        Small constant to avoid division by zero.
+
+    Returns
+    -------
+    new_global_weights : list of np.ndarray
+        Updated global weights after hybrid aggregation.
+    """
+    num_clients = len(client_weights_list)
+    if num_clients == 0:
+        # Nothing to aggregate
+        return [w.copy() for w in global_weights]
+
+    # ----- 1) Compute client updates relative to global -----
+    client_updates = []
+    for k in range(num_clients):
+        cw = client_weights_list[k]
+        update_k = [cw_l - gw_l for cw_l, gw_l in zip(cw, global_weights)]
+        client_updates.append(update_k)
+
+    # If only one client, just apply its update with full weight
+    if num_clients == 1:
+        return [gw + u for gw, u in zip(global_weights, client_updates[0])]
+
+    # ----- 2) Flatten updates for similarity computation -----
+    flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
+
+    # ----- 3) RBF similarity matrix between client updates -----
+    # pairwise squared distances
+    # shape: (K, K)
+    diff = flat_updates[:, None, :] - flat_updates[None, :, :]
+    sq_dists = np.sum(diff * diff, axis=-1)
+
+    # RBF kernel
+    sim_matrix = np.exp(-gamma * sq_dists)  # (K, K)
+
+    # Row-based similarity score per client (sum or mean are both fine; we’ll sum)
+    sim_scores = sim_matrix.sum(axis=1)  # shape (K,)
+    sim_scores = np.maximum(sim_scores, eps)
+    sim_scores = sim_scores / (sim_scores.sum() + eps)  # normalize to sum 1
+
+    # ----- 4) FedAvg-style sample weights -----
+    sample_w = np.asarray(client_num_samples, dtype=float)
+    sample_w = np.maximum(sample_w, 0.0)
+    if sample_w.sum() <= 0:
+        # fallback to uniform if something weird
+        sample_w = np.ones_like(sample_w)
+    sample_w = sample_w / (sample_w.sum() + eps)
+
+    # ----- 5) Combine FedAvg weights and similarity (multiplicatively) -----
+    # Option: product then renormalize
+    combined_w = sample_w * sim_scores
+    combined_w = np.maximum(combined_w, eps)
+    combined_w = combined_w / (combined_w.sum() + eps)  # final weights sum to 1
+
+    # ----- 6) Apply weighted average of updates to global weights -----
+    new_global_weights = []
+    for layer_idx in range(len(global_weights)):
+        # weighted sum of client updates for this layer
+        agg_update_layer = sum(
+            combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
+        )
+        new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
+
+    return new_global_weights

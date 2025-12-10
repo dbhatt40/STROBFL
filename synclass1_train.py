@@ -22,7 +22,7 @@ from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
 from utils.eval_utils import eval_func
-from utils.synclass1_utils import federated_mixed_drift_stream_with_queues
+from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf
 from synclass1_agents import synclass1_agent
 
 
@@ -103,8 +103,21 @@ def synclass1_train_fn(return_dict, results_dict):
         print('Joined all processes for time step %s' % round_idx)
 
         global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-        for k in range(num_agents_per_time):
-             global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
+        
+        if 'avg' in gv.gar:
+           for client_agents in range(num_agents_per_time):
+               global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[client_agents])]
+        elif 'strobfl' in gv.gar:
+              client_num_samples = np.array(
+                   [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
+                   dtype=np.float64,
+                  )
+              global_weights= aggregate_with_rbf(
+                global_weights,
+                curr_agents,
+                client_num_samples,
+                gamma=1.0,
+                eps=1e-12)
  	
 		# Saving for the next update
         np.save(gv.dir_name + 'global_weights_t%s.npy' %
