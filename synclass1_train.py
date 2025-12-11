@@ -28,6 +28,7 @@ from synclass1_agents import synclass1_agent
 
 def synclass1_train_fn(return_dict, results_dict):
 	# Start the training process
+
     T = gv.T
     C = gv.C
     k = gv.k
@@ -65,9 +66,10 @@ def synclass1_train_fn(return_dict, results_dict):
     for round_idx, client_batches, test_batch in gen:
         print("Round:", round_idx)
 	
+
         X_test, y_test, t_test = test_batch
-        print("  Test:", X_test.shape, y_test.shape, t_test.shape)
-        # print("-" * 40)        print('-----------------Training client in server round %s----------------' % t)
+        print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
+        print('-----------------Training client in server round %s----------------' % round_idx)
 
         lmbda = C*(1-C)
         probs = [C + lmbda*ri for ri in r]
@@ -87,14 +89,15 @@ def synclass1_train_fn(return_dict, results_dict):
             for l in range(true_simul):
                 gpu_index = int(l / gv.max_agents_per_gpu)
                 gpu_id = gv.gpu_ids[gpu_index]
-                i = curr_agents[k]
+                i = curr_agents[activeclient]
+                print('Client training %s agent' % i)
                 X_batch, y_batch, t_batch= client_batches[i]     
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
                 p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 p.start()
                 process_list.append(p)
                 activeclient += 1	
-				 
+ 				 
             for item in process_list:
                 item.join()
             agents_left = num_agents_per_time - activeclient
@@ -105,12 +108,12 @@ def synclass1_train_fn(return_dict, results_dict):
         global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
         
         if 'avg' in gv.gar:
-           for client_agents in range(num_agents_per_time):
-               global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[client_agents])]
+            for client_agents in range(num_agents_per_time):
+                global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[client_agents])]
         elif 'strobfl' in gv.gar:
               client_num_samples = np.array(
-                   [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
-                   dtype=np.float64,
+                    [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
+                    dtype=np.float64,
                   )
               global_weights= aggregate_with_rbf(
                 global_weights,
@@ -132,6 +135,7 @@ def synclass1_train_fn(return_dict, results_dict):
         eval_loss_list.append(return_dict['eval_loss'])
  	
         file_write_resultsdata(results_dict)
+
 
 
 

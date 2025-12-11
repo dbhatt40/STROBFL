@@ -142,8 +142,28 @@ def init():
     num_gpus = len(gpu_ids)
 
     global max_agents_per_gpu
+    
 
-    global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, C,k,T,NUM_DRIFTED, gar
+
+
+    global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, NUM_DRIFTED 
+    BATCH_SIZE = None
+    NUM_CLASSES = None
+    WINDOW_SIZE = None
+    DATA_DIM = None
+    NUM_DRIFTED = None
+    BATCH_SIZE = args.B
+    
+    global T,C, k, gar
+    T = None
+    C = None
+    k = None
+    gar = None
+    
+    T = args.T
+    C = args.C
+    k = args.k
+    gar = args.gar
 
     global max_acc
 
@@ -159,7 +179,7 @@ def init():
     elif args.dataset == 'synthetic-class1':     
        DATA_DIM = 2
        NUM_CLASSES = 4
-       WINDOW_SIZE = 50
+       WINDOW_SIZE = 500
        NUM_DRIFTED = 2
        max_acc = 85.0
        max_agents_per_gpu = 2

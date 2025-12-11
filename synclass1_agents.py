@@ -191,25 +191,18 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
 # Custom optimizer
     base_lr  = 0.01
-    optimizer = CustomRuleSGD(learning_rate=base_lr, update_rule=ema_rule)
-
-    train_op = optimizer.minimize(loss, global_step=global_step)
-
-
+    
 
     if args.optimizer == 'adam':
         optimizer = tf.train.AdamOptimizer(
-            learning_rate=lr).minimize(loss)
+            learning_rate=lr)
+        train_op = optimizer.minimize(loss, global_step=global_step)
     elif args.optimizer == 'sgd':
         optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=lr).minimize(loss)
     elif args.optimizer == 'strobfl_learn':
-        optimizer = CustomRuleSGD(
-            learning_rate=lr).minimize(loss)
-  
-    
-    
-    
+        optimizer = CustomRuleSGD(learning_rate=base_lr, update_rule=ema_rule)
+        train_op = optimizer.minimize(loss, global_step=global_step)
     
     
     if args.k > 1:
@@ -231,8 +224,6 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     agent_model.set_weights(theta)
     # print('loaded shared weights')
  	
-
-
     batch_size = len(x_batch)
 
     B=gv.BATCH_SIZE
