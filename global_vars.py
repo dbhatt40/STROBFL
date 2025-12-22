@@ -180,7 +180,7 @@ def init():
        DATA_DIM = 2
        NUM_CLASSES = 4
        WINDOW_SIZE = 500
-       NUM_DRIFTED = 2
+       NUM_DRIFTED = 0
        max_acc = 85.0
        max_agents_per_gpu = 2
        mem_frac = 0.05

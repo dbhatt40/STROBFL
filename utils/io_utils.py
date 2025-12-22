@@ -138,6 +138,21 @@ def file_write_resultsdata(results_dict, purpose='results_data'):
 				  writer.writerow(client_data)
 		   
 		f.close()
+        
+def file_write_train_metrics(results_dict, purpose='train_metrics'):
+	
+		filename = gv.output_dir_name + purpose + '.csv'
+		f = open(filename,'a')
+		
+		fieldnames = list(next(iter(results_dict.values())).keys())
+
+		with open(filename, "w", newline="") as f:
+			  writer = csv.DictWriter(f, fieldnames=fieldnames)
+			  writer.writeheader()  # top row = keys
+			  for client_data in results_dict.values():
+				  writer.writerow(client_data)
+		   
+		f.close()
 
 def write_matrix(mat, purpose):
     filename = gv.output_dir_name + gv.output_file_name + '_' + purpose 

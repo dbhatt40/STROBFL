@@ -332,10 +332,9 @@ def federated_mixed_drift_stream_with_queues(
         )
 
     # One global test stream: drifting
-    test_stream = DriftStream4Class(
+    test_stream = StationaryStream4Class(
         noise_std=noise_std,
-        imbalance_factor=imbalance_factor,
-        samples_per_cycle=samples_per_cycle,
+        imbalance_factor=imbalance_factor,        
         random_state=rng.integers(1_000_000),
     )
 
@@ -509,7 +508,9 @@ def _flatten_weights(weights_list):
 
 def aggregate_with_rbf(
     global_weights,
-    client_weights_list,
+    num_clients,
+    client_dict,
+    agent_list,
     client_num_samples,
     gamma=1.0,
     eps=1e-12,
@@ -537,7 +538,10 @@ def aggregate_with_rbf(
     new_global_weights : list of np.ndarray
         Updated global weights after hybrid aggregation.
     """
-    num_clients = len(client_weights_list)
+    print("Into rbf aggregation")
+    # num_clients = len(client_weights_list)
+
+
     if num_clients == 0:
         # Nothing to aggregate
         return [w.copy() for w in global_weights]
@@ -545,13 +549,9 @@ def aggregate_with_rbf(
     # ----- 1) Compute client updates relative to global -----
     client_updates = []
     for k in range(num_clients):
-        cw = client_weights_list[k]
-        update_k = [cw_l - gw_l for cw_l, gw_l in zip(cw, global_weights)]
-        client_updates.append(update_k)
+        cw = client_dict[str(agent_list[k])]
+        client_updates.append(cw)
 
-    # If only one client, just apply its update with full weight
-    if num_clients == 1:
-        return [gw + u for gw, u in zip(global_weights, client_updates[0])]
 
     # ----- 2) Flatten updates for similarity computation -----
     flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
@@ -559,13 +559,19 @@ def aggregate_with_rbf(
     # ----- 3) RBF similarity matrix between client updates -----
     # pairwise squared distances
     # shape: (K, K)
-    diff = flat_updates[:, None, :] - flat_updates[None, :, :]
-    sq_dists = np.sum(diff * diff, axis=-1)
+    X = flat_updates
+    sq_norms = np.sum(X * X, axis=1, keepdims=True)          # (K,1)
 
+    sq_dists = sq_norms + sq_norms.T - 2.0 * (X @ X.T)       # (K,K)
+    sq_dists = np.maximum(sq_dists, 0.0)
+    off = sq_dists[~np.eye(num_clients, dtype=bool)]
+    gamma = 1.0 / (np.median(off) + eps)
+ 
     # RBF kernel
     sim_matrix = np.exp(-gamma * sq_dists)  # (K, K)
 
     # Row-based similarity score per client (sum or mean are both fine; we’ll sum)
+    np.fill_diagonal(sim_matrix, 0.0)   # remove self-sim
     sim_scores = sim_matrix.sum(axis=1)  # shape (K,)
     sim_scores = np.maximum(sim_scores, eps)
     sim_scores = sim_scores / (sim_scores.sum() + eps)  # normalize to sum 1

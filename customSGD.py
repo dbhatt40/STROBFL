@@ -24,13 +24,14 @@ class CustomRuleSGD(tf.compat.v1.train.GradientDescentOptimizer):
         pairs = [(g, v) for g, v in grads_and_vars if g is not None]
         if not pairs:
             return tf.no_op(name or "custom_sgd_noop")
-
+        max_gn = 5.0
+     
         update_ops = []
         for grad, var in pairs:
             if isinstance(grad, tf.IndexedSlices):
                 grad = tf.convert_to_tensor(grad)  # densify unless you implement sparse path
             lr_t = self._lr_for(var)
-
+            grad = tf.clip_by_norm(grad,max_gn)
             # Default delta if no custom rule provided
             delta = lr_t * grad if self._update_rule is None \
                     else self._update_rule(grad, var, lr_t, global_step)
@@ -88,6 +89,13 @@ def gradient_update_rule_factory(alpha_var, name_prefix="grad_ema"):
             return tf.identity(delta, name="ema_blend_delta")
 
     update_rule.ema_slots = slots
+    
+    def make_reset_op():
+    # IMPORTANT: slots only exist after first time update_rule is used to build graph
+       return tf.group(*[s.assign(tf.zeros_like(s)) for s in slots.values()],
+                    name=f"{name_prefix}_reset")
+
+    update_rule.make_reset_op = make_reset_op
     return update_rule
 
 

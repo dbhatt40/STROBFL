@@ -52,23 +52,24 @@ def synclass1_train_fn(return_dict, results_dict):
     num_rounds=T,
     num_clients=k,
     batch_size=gv.WINDOW_SIZE,
-    num_drifted_clients=gv.NUM_DRIFTED,
+    num_drifted_clients=1,
     drift_clients_mode="independent",  # or "shared"
-    arrival_rate=0.7,
+    arrival_rate=1.0,
     test_batch_size=256,
     noise_std=0.2,
     imbalance_factor=0.3,
-    samples_per_cycle=20000,
+    samples_per_cycle=40000,
     random_state=42,
     )
 	
 	
     for round_idx, client_batches, test_batch in gen:
         print("Round:", round_idx)
-	
+
+
 
         X_test, y_test, t_test = test_batch
-        print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
+        # print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
         print('-----------------Training client in server round %s----------------' % round_idx)
 
         lmbda = C*(1-C)
@@ -93,6 +94,7 @@ def synclass1_train_fn(return_dict, results_dict):
                 print('Client training %s agent' % i)
                 X_batch, y_batch, t_batch= client_batches[i]     
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
+
                 p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 p.start()
                 process_list.append(p)
@@ -106,6 +108,7 @@ def synclass1_train_fn(return_dict, results_dict):
         print('Joined all processes for time step %s' % round_idx)
 
         global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
+
         
         if 'avg' in gv.gar:
             for client_agents in range(num_agents_per_time):
@@ -115,12 +118,15 @@ def synclass1_train_fn(return_dict, results_dict):
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
                     dtype=np.float64,
                   )
+
               global_weights= aggregate_with_rbf(
-                global_weights,
-                curr_agents,
-                client_num_samples,
-                gamma=1.0,
-                eps=1e-12)
+                 global_weights,
+                 num_agents_per_time,
+                 return_dict,
+                 curr_agents,
+                 client_num_samples,
+                 gamma=1.0,
+                 eps=1e-12)
  	
 		# Saving for the next update
         np.save(gv.dir_name + 'global_weights_t%s.npy' %
@@ -135,6 +141,7 @@ def synclass1_train_fn(return_dict, results_dict):
         eval_loss_list.append(return_dict['eval_loss'])
  	
         file_write_resultsdata(results_dict)
+
 
 
 
