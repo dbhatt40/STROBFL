@@ -17,6 +17,7 @@ tf.get_logger().setLevel(logging.ERROR)
 
 global data_dir
 
+
 def dir_name_fn(args):
     # Setting directory name to store computed weights
     dir_name = 'weights/%s/%s/k%s_C%s_B%s' % (
@@ -84,7 +85,10 @@ def init():
     parser.add_argument("--T", type=int, default=40, help="max time_steps")
     parser.add_argument("--B", type=int, default=25, help="agent batch size")
     parser.add_argument("--gar", type=str, default='avg', help="server aggregation rule")
-
+    parser.add_argument("--ndrift", type=str, default=0, help="number drifted clients")
+    parser.add_argument("--tdrift", type=str, default='shared', help="type of drift - shared/independent")
+    parser.add_argument("--imb", type=str, default=0.3, help="imbalance factor")
+    
 
     parser.add_argument("--steps", type=int, default=None,
                         help="GD steps per agent")
@@ -142,7 +146,7 @@ def init():
     num_gpus = len(gpu_ids)
 
     global max_agents_per_gpu
-    
+    max_agents_per_gpu = 2
 
 
 

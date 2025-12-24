@@ -8,6 +8,7 @@ Created on Sun Nov 23 15:01:55 2025
 import numpy as np
 from tensorflow.keras import layers, Model
 import global_vars as gv
+import time
 
 class DriftStream4Class:
     """
@@ -26,6 +27,7 @@ class DriftStream4Class:
         imbalance_factor=0.0,
         samples_per_cycle=10000,
         random_state=None,
+        initial_step=0
     ):
         self.rng = np.random.default_rng(random_state)
         self.noise_std = float(noise_std)
@@ -33,7 +35,7 @@ class DriftStream4Class:
         self.samples_per_cycle = int(samples_per_cycle)
 
         # Keep a global counter for "time"
-        self.global_step = 0
+        self.global_step = initial_step
 
         # Class prior bias (same as stationary stream)
         self.class_prior_bias = np.array([2.0, 0.5, -0.5, -1.0])
@@ -314,11 +316,13 @@ def federated_mixed_drift_stream_with_queues(
                 client_streams[cid] = shared_stream  # all share same drift
         elif drift_clients_mode == "independent":
             for cid in drifted_client_ids:
+                phase_offset = int(rng.integers(0, samples_per_cycle))
                 client_streams[cid] = DriftStream4Class(
                     noise_std=noise_std,
                     imbalance_factor=imbalance_factor,
                     samples_per_cycle=samples_per_cycle,
                     random_state=rng.integers(1_000_000) + cid,
+                    initial_step=phase_offset
                 )
         else:
             raise ValueError("drift_clients_mode must be 'independent' or 'shared'")
@@ -594,6 +598,106 @@ def aggregate_with_rbf(
     new_global_weights = []
     for layer_idx in range(len(global_weights)):
         # weighted sum of client updates for this layer
+        agg_update_layer = sum(
+            combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
+        )
+        new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
+
+    return new_global_weights
+
+
+
+
+def aggregate_with_rbf_and_aging(
+    global_weights,
+    num_clients,
+    client_dict,
+    agent_list,
+    client_num_samples,
+    gamma=1.0,
+    eps=1e-12,
+    age_lambda=1.0          # 0.0 disables aging (all ages weight = 1)
+    ):
+    """
+    FedAvg * RBF-similarity * Aging aggregation.
+
+    Aging factor uses: age_score = exp(-age_lambda * age)
+    where age = current_time - timeofupdate.
+    """
+    current_time=None
+    if current_time is None:
+        current_time = time.time()  # seconds since epoch by default
+
+    if num_clients == 0:
+        return [w.copy() for w in global_weights]
+
+    # ----- 1) Collect client updates + timestamps -----
+    client_updates = []
+    client_times = []
+
+    for k in range(num_clients):
+        entry = client_dict[str(agent_list[k])]
+        t_u = entry.get("time", None)
+        client_updates.append(entry)
+        client_times.append(t_u)
+
+    # ----- 2) Flatten updates for similarity computation -----
+    flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
+
+    # ----- 3) RBF similarity matrix between client updates -----
+    X = flat_updates
+    sq_norms = np.sum(X * X, axis=1, keepdims=True)          # (K,1)
+    sq_dists = sq_norms + sq_norms.T - 2.0 * (X @ X.T)       # (K,K)
+    sq_dists = np.maximum(sq_dists, 0.0)
+
+    off = sq_dists[~np.eye(num_clients, dtype=bool)]
+    if off.size > 0:
+        gamma_eff = 1.0 / (np.median(off) + eps)
+    else:
+        gamma_eff = gamma  # degenerate case K=1
+    sim_matrix = np.exp(-gamma_eff * sq_dists)               # (K,K)
+
+    np.fill_diagonal(sim_matrix, 0.0)
+    sim_scores = sim_matrix.sum(axis=1)                      # (K,)
+    sim_scores = np.maximum(sim_scores, eps)
+    sim_scores = sim_scores / (sim_scores.sum() + eps)
+
+    # ----- 4) FedAvg-style sample weights -----
+    sample_w = np.asarray(client_num_samples, dtype=float)
+    sample_w = np.maximum(sample_w, 0.0)
+    if sample_w.sum() <= 0:
+        sample_w = np.ones_like(sample_w)
+    sample_w = sample_w / (sample_w.sum() + eps)
+
+    # ----- 5) Aging weights -----
+    # If age_lambda == 0 => all ones (no aging).
+    age_scores = np.ones(num_clients, dtype=float)
+
+    if age_lambda and age_lambda > 0.0:
+        for k in range(num_clients):
+            t_u = client_times[k]
+            if t_u is None:
+                # If no timestamp, treat as "fresh" (age=0) OR you can treat as old.
+                age = 0.0
+            else:
+                age = float(current_time) - float(t_u)
+            # decay: newer => larger weight
+            age_scores[k] = np.exp(-age_lambda * max(age, 0.0))
+
+        age_scores = np.maximum(age_scores, eps)
+        age_scores = age_scores / (age_scores.sum() + eps)
+    else:
+        # normalized ones (optional)
+        age_scores = age_scores / (age_scores.sum() + eps)
+
+    # ----- 6) Combine all three multiplicatively + renormalize -----
+    combined_w = sample_w * sim_scores * age_scores
+    combined_w = np.maximum(combined_w, eps)
+    combined_w = combined_w / (combined_w.sum() + eps)
+
+    # ----- 7) Apply weighted average of updates to global weights -----
+    new_global_weights = []
+    for layer_idx in range(len(global_weights)):
         agg_update_layer = sum(
             combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
         )

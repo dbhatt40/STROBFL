@@ -22,7 +22,7 @@ from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
 from utils.eval_utils import eval_func
-from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf
+from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging
 from synclass1_agents import synclass1_agent
 
 
@@ -119,14 +119,15 @@ def synclass1_train_fn(return_dict, results_dict):
                     dtype=np.float64,
                   )
 
-              global_weights= aggregate_with_rbf(
+              global_weights= aggregate_with_rbf_and_aging(
                  global_weights,
                  num_agents_per_time,
                  return_dict,
                  curr_agents,
                  client_num_samples,
                  gamma=1.0,
-                 eps=1e-12)
+                 eps=1e-12,
+                 age_lambda=1.0)
  	
 		# Saving for the next update
         np.save(gv.dir_name + 'global_weights_t%s.npy' %

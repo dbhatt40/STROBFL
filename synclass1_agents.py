@@ -31,6 +31,7 @@ from customSGD import CustomRuleSGD, gradient_update_rule_factory
 from utils.synclass1_utils import synclass1_model
 from utils.io_utils import file_write_train_metrics
 from collections import deque
+import time
 
 
 PER_LABEL_STATS = {
@@ -370,7 +371,15 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     # print("Y test in agents:", Y_test.shape
   
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
- 	
+    
+    seed=None
+    max_delay_s = 2.0  # max 2 sec delay
+    rng = np.random.default_rng(seed if seed is not None else (12345 + current_agent))
+    if rng.random() < 0.3:    # delay only some clients
+      delay = rng.exponential(scale=0.5)   # mean 0.5s
+      delay = min(delay, max_delay_s)      # cap it
+      time.sleep(float(delay))	
+    
     client_str = "client_" + str(current_agent) + "_t_" + str(round_idx)
     results_dict[client_str] = {"t": round_idx, "i": current_agent, "eval_success": eval_success, "eval_loss": eval_loss}  
     # print("Results dict:", results_dict[client_str])
@@ -381,6 +390,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     return_dict[str(current_agent)] = np.array(local_delta)
     return_dict["theta{}".format(current_agent)] = np.array(local_weights)
     return_dict[str(current_agent) + "_num_samples"] = batch_size
+    return_dict[str(current_agent) + "_time"] = time.time()
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (current_agent, round_idx), local_delta)
 
