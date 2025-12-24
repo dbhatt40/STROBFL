@@ -41,7 +41,7 @@ PER_LABEL_STATS = {
 }
 
 class LossStabilityTest:
-    def __init__(self, window=12, min_increase=0.4, std_mult=3.0):
+    def __init__(self, window=10, min_increase=0.4, std_mult=3.0):
         self.window = int(window)
         self.min_increase = float(min_increase)
         self.std_mult = float(std_mult)
@@ -78,7 +78,7 @@ class PageHinkley:
     Detects a sustained *increase* in the monitored signal.
     To detect a decrease, call update() with -x instead of x.
     """
-    def __init__(self, delta=0.001, lambd=0.8, min_instances=30):
+    def __init__(self, delta=0.05, lambd=0.8, min_instances=30):
         """
         delta: small tolerance for slight changes (insensitivity zone)
         lambd: threshold for raising an alarm
@@ -149,8 +149,8 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
     num_classes = gv.NUM_CLASSES
     batch_size = len(x_batch)
-    B=10
-    num_steps = int(batch_size/B)
+    train_batchsize=gv.B
+    num_steps = int(batch_size/train_batchsize)
    
 # Global step (optional but useful)
     global_step = tf.Variable(0, trainable=False, name="global_step")
@@ -164,24 +164,44 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         optimizer = tf.train.AdamOptimizer(learning_rate=lr_var)
         train_op = optimizer.minimize(loss, global_step=global_step)
     elif args.optimizer == 'strobfl_learn':
-        y_int = tf.cast(y, tf.int32)
-        class_w_ph = tf.placeholder(tf.float32, shape=[gv.NUM_CLASSES], name="class_w")
-        per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits)
-        # One-hot encode [B, C]
-        one_hot = tf.one_hot(y_int, depth=num_classes, dtype=tf.float32)
-       # Expand per-example loss to [B, 1]
-        per_loss_col = tf.expand_dims(per_example_loss, axis=1)
-        # Sum of losses contributed by each label
-        loss_sum_per_label = tf.reduce_sum(one_hot * per_loss_col, axis=0)
-       # Samples per label
-        count_per_label = tf.reduce_sum(one_hot, axis=0)
         eps = 1e-8
-    # Average loss per label
+        class_w_ph = tf.placeholder(tf.float32, shape=[gv.NUM_CLASSES], name="class_w")
+# Per-example loss: shape [B]
+        per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=y,
+                logits=logits
+                )
+# --- Per-label sums and counts ---
+        y_int = tf.cast(y, tf.int32)
+# sum of losses per label: shape [C]
+        loss_sum_per_label = tf.math.unsorted_segment_sum(
+                data=per_example_loss,
+                segment_ids=y_int,
+                num_segments=gv.NUM_CLASSES
+                )
+# count per label: shape [C]
+        ones = tf.ones_like(per_example_loss, dtype=tf.float32)
+        count_per_label = tf.math.unsorted_segment_sum(
+            data=ones,
+            segment_ids=y_int,
+            num_segments=gv.NUM_CLASSES
+            )
+# per-label mean loss: shape [C]
         per_label_loss = tf.where(
-        count_per_label > 0,
-        loss_sum_per_label / (count_per_label + eps),
-        tf.zeros_like(loss_sum_per_label)
-        )
+            count_per_label > 0.0,
+            loss_sum_per_label / (count_per_label + eps),
+            tf.zeros_like(loss_sum_per_label)
+            )
+# --- If you want a scalar loss with class weights ---
+# weight each example by its label's weight
+        w_per_example = tf.gather(class_w_ph, y_int)  # shape [B]
+
+        weighted_loss = tf.reduce_sum(w_per_example * per_example_loss) / (
+            tf.reduce_sum(w_per_example) + eps
+            )
+        
+        
+      
 
     # Predictions for this batch
         preds = tf.argmax(logits, axis=1, output_type=tf.int32)
@@ -202,22 +222,14 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         f1_per_label = 2 * precision * recall / (precision + recall + eps)
     # Macro F1
         f1_macro = tf.reduce_mean(f1_per_label)
-
-
-
-        alpha_stable = 0.3  # when no drift
-        alpha_drift  = 0.7  # when drift detected (faster adaptation)
-
+        alpha_stable= 0.8
         alpha_var = tf.Variable(alpha_stable, trainable=False,
                         dtype=tf.float32, name="ema_alpha")
         # EMA-based update rule using alpha_var
         ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
      
-        weights = tf.gather(class_w_ph, y)          # shape (B,)
-        loss = tf.reduce_mean(per_example_loss * weights)
-      
         optimizer = CustomRuleSGD(learning_rate=lr_var, update_rule=ema_rule)
-        train_op = optimizer.minimize(loss, global_step=global_step)
+        train_op = optimizer.minimize(weighted_loss, global_step=global_step)
         reset_ema_op = ema_rule.make_reset_op()
         num_classes = gv.NUM_CLASSES
 
@@ -228,17 +240,17 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     # Page-Hinkley detectors per label
     # Tune delta / lambd / min_instances as needed
         loss_ph_per_label = [
-          PageHinkley(delta=0.08, lambd=20, min_instances=30)
+          PageHinkley(delta=0.08, lambd=20, min_instances=20)
           for _ in range(num_classes)
          ]
 
         f1_ph_per_label = [
-          PageHinkley(delta=0.001, lambd=20, min_instances=30)
+          PageHinkley(delta=0.05, lambd=20, min_instances=30)
           for _ in range(num_classes)
           ]
   
         cooldown_steps = 10  # after this many steps without drift -> go back to stable
-        stab = LossStabilityTest(window=B, min_increase=0.10, std_mult=1.3)
+        stab = LossStabilityTest(window=10, min_increase=0.40, std_mult=3.0)
         
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
@@ -258,17 +270,28 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         theta = shared_weights
     agent_model.set_weights(theta)
     # print('loaded shared weights')
- 	
 
     start_offset = 0
     loss_ema = None
     pll_ema = None
+    f1l_ema = None
     ema_beta = 0.9  
+ 
+    lr_stable = 0.1
+    lr_unstable = lr_stable*0.5
+    lr_lfdrift = lr_stable*0.75
+    lr_ldrift = lr_stable*0.9
+    
+    alpha_stable = 0.8
+    alpha_unstable = 0
+    alpha_lfdrift = alpha_stable*0.625
+    alpha_ldrift = alpha_stable*0.25
+    
     steps_since_drift = 0  # Python-side counter
     print("Num steps: {}".format(num_steps))
     for step in range(num_steps):
         start_offset = start_offset
-        end_offset = start_offset + B
+        end_offset = start_offset + train_batchsize
         X_batch = x_batch[start_offset: end_offset]
         Y_batch = y_batch[start_offset: end_offset]
         if args.optimizer == 'adam':
@@ -282,8 +305,8 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
                
           # print("For step: {} X_batch: {}, Y_batch: {}".format(step, X_batch, Y_batch))
           fetch_ops = [
-             train_op,
-           loss,
+           train_op,
+           weighted_loss,
            per_label_loss,
            f1_macro,
            f1_per_label
@@ -295,13 +318,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
           _, loss_val, pll_val, f1m_val, f1l_val, pred_val = sess.run(
                                   fetch_ops, feed_dict={x: X_batch, y: Y_batch, class_w_ph: w})
           
-          if loss_ema is None:
-             loss_ema = loss_val
-          else:
-             loss_ema = ema_beta * loss_ema + (1.0 - ema_beta) * loss_val
-          unstable, stats = stab.update(loss_ema)
-          if(unstable):
-              print("UNSTABLE")
+
 
 # =============================================================================
 #         print("true counts:", np.bincount(Y_batch.astype(np.int32), minlength=gv.NUM_CLASSES))
@@ -310,53 +327,80 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 # 
 # =============================================================================
         # print('loss {}, p1l_val {}, f1mval {}, f1l {}'.format(loss_val, pll_val, f1m_val, f1l_val))
-          if pll_ema is None:
-            pll_ema = pll_val
-          else:
+        
+        pll_val = np.nan_to_num(pll_val, nan=0.0)
+        f1l_val = np.nan_to_num(f1l_val, nan=0.0)
+
+# scalar loss EMA
+        if loss_ema is None:
+            loss_ema = loss_val
+        else:
+            loss_ema = ema_beta * loss_ema + (1.0 - ema_beta) * loss_val
+
+        unstable, stats = stab.update(loss_ema)
+
+# per-label loss EMA
+        if pll_ema is None:
+            pll_ema = pll_val.copy()
+        else:
             pll_ema = ema_beta * pll_ema + (1.0 - ema_beta) * pll_val
 
-          pll_val = np.asarray(pll_val, dtype=np.float32)
-          f1l_val = np.asarray(f1l_val, dtype=np.float32)
+# per-label F1 EMA (good since same-batch F1 is noisy)
+        if f1l_ema is None:
+            f1l_ema = f1l_val.copy()
+        else:
+            f1l_ema = ema_beta * f1l_ema + (1.0 - ema_beta) * f1l_val
 
-          pll_val = np.nan_to_num(pll_val, nan=0.0)
-          f1l_val = np.nan_to_num(f1l_val, nan=0.0)
+# ---- Drift detection (PH per label) ----
+        any_drift  = False
+        loss_drift = False
+        f1_drift   = False
+        unstable = False
 
-          any_drift = False
-          MIN_COUNT=20
-          loss_drift = False
-          f1_drift=False
-          label_counts = np.bincount(Y_batch, minlength=gv.NUM_CLASSES)
-          for c in range(num_classes):
-              loss_c = float(pll_ema[c])
-              f1_c   = float(f1l_val[c])
-          # (optional) store histories...
-              loss_history_per_label[c].append(loss_c)
-              f1_history_per_label[c].append(f1_c)
-              if label_counts[c] >= MIN_COUNT:
-          # Page–Hinkley on loss ↑
-                loss_drift = loss_ph_per_label[c].update(loss_c)
-          # Page–Hinkley on F1 ↓ (use -F1)
-                f1_drift   = f1_ph_per_label[c].update(-f1_c)
-                  
-          if loss_drift or f1_drift:
-               any_drift = True
-               # print(f"[PH] Drift detected on label {c} at step {step} "
-               #    f"(loss_c={loss_c:.4f}, f1_c={f1_c:.4f})")
+        MIN_COUNT_LOSS = int(train_batchsize/gv.NUM_CLASSES)
+        MIN_COUNT_F1   = int(train_batchsize/gv.NUM_CLASSES)*2
 
-          # ---- Adapt EMA alpha based on drift ----
-          if any_drift or unstable:
-            # Concept drift: reduce alpha -> less memory, more weight to current grad
-                sess.run(alpha_var.assign(alpha_drift))
-                sess.run(lr_var.assign(lr_var*0.5))   # sets LR 
-                sess.run(reset_ema_op)
-                steps_since_drift = 0
-          else:
+        label_counts = np.bincount(Y_batch, minlength=gv.NUM_CLASSES)
+
+        for c in range(num_classes):
+            loss_c = float(pll_ema[c])
+            f1_c   = float(f1l_ema[c])
+
+            loss_history_per_label[c].append(loss_c)
+            f1_history_per_label[c].append(f1_c)
+
+    # loss PH
+            if label_counts[c] >= MIN_COUNT_LOSS:
+              ld = loss_ph_per_label[c].update(loss_c)
+              loss_drift |= ld
+              any_drift |= ld
+
+    # F1 PH (use -F1, but only if enough support)
+            if label_counts[c] >= MIN_COUNT_F1:
+             fd = f1_ph_per_label[c].update(-f1_c)
+             f1_drift  |= fd
+             any_drift |= ld
+
+# ---- Adapt EMA alpha based on drift ----
+
+            if (unstable or any_drift):
+               steps_since_drift = 0
+               if unstable:
+                 sess.run(reset_ema_op)
+                 sess.run(alpha_var.assign(alpha_unstable))
+                 sess.run(lr_var.assign(lr_unstable)) 
+               elif loss_drift and f1_drift:
+                   sess.run(alpha_var.assign(alpha_lfdrift))
+                   sess.run(lr_var.assign(lr_lfdrift))                 
+               elif loss_drift:
+                  sess.run(alpha_var.assign(alpha_ldrift))
+                  sess.run(lr_var.assign(lr_ldrift))                
+            else:
                 steps_since_drift += 1
                 if steps_since_drift >= cooldown_steps:
-                # Go back to “stable” alpha when no drift for a while
-                  sess.run(alpha_var.assign(alpha_stable))
-                  sess.run(lr_var.assign(1e-1))   # sets LR to 0.1 again
-                  steps_since_drift = 0
+                    sess.run(alpha_var.assign(alpha_stable))
+                    sess.run(lr_var.assign(lr_stable)) 
+
 
         start_offset = end_offset
 
@@ -373,7 +417,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
     
     seed=None
-    max_delay_s = 2.0  # max 2 sec delay
+    max_delay_s = 1.0  # max 2 sec delay
     rng = np.random.default_rng(seed if seed is not None else (12345 + current_agent))
     if rng.random() < 0.3:    # delay only some clients
       delay = rng.exponential(scale=0.5)   # mean 0.5s

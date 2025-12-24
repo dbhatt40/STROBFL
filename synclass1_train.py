@@ -22,7 +22,7 @@ from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
 from utils.eval_utils import eval_func
-from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging
+from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging, aggregate_with_rbf
 from synclass1_agents import synclass1_agent
 
 
@@ -47,22 +47,22 @@ def synclass1_train_fn(return_dict, results_dict):
 
     r = [1 for i in range(0,k)]
 	
-	
+    print('number drifted:{},driftmode:{},arrivalrate:{},imbalance:{}'.format(gv.ndrift, gv.dmode, gv.arate, gv.ifactor))
     gen = federated_mixed_drift_stream_with_queues(
     num_rounds=T,
     num_clients=k,
     batch_size=gv.WINDOW_SIZE,
-    num_drifted_clients=1,
+    num_drifted_clients=0,
     drift_clients_mode="independent",  # or "shared"
     arrival_rate=1.0,
     test_batch_size=256,
     noise_std=0.2,
     imbalance_factor=0.3,
-    samples_per_cycle=40000,
+    samples_per_cycle=100000,
     random_state=42,
     )
 	
-	
+
     for round_idx, client_batches, test_batch in gen:
         print("Round:", round_idx)
 
@@ -119,6 +119,17 @@ def synclass1_train_fn(return_dict, results_dict):
                     dtype=np.float64,
                   )
 
+# =============================================================================
+#               global_weights= aggregate_with_rbf(
+#                  global_weights,
+#                  num_agents_per_time,
+#                  return_dict,
+#                  curr_agents,
+#                  client_num_samples,
+#                  gamma=1.0,
+#                  eps=1e-12)
+#  	
+# =============================================================================
               global_weights= aggregate_with_rbf_and_aging(
                  global_weights,
                  num_agents_per_time,
@@ -128,7 +139,7 @@ def synclass1_train_fn(return_dict, results_dict):
                  gamma=1.0,
                  eps=1e-12,
                  age_lambda=1.0)
- 	
+              
 		# Saving for the next update
         np.save(gv.dir_name + 'global_weights_t%s.npy' %
 				(round_idx + 1), global_weights)

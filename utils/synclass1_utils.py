@@ -510,101 +510,6 @@ def _flatten_weights(weights_list):
     """Flatten a list/tuple of numpy arrays into a single 1D vector."""
     return np.concatenate([w.ravel() for w in weights_list])
 
-def aggregate_with_rbf(
-    global_weights,
-    num_clients,
-    client_dict,
-    agent_list,
-    client_num_samples,
-    gamma=1.0,
-    eps=1e-12,
-):
-    """
-    Hybrid FedAvg + RBF-similarity aggregation.
-
-    Parameters
-    ----------
-    global_weights : list of np.ndarray
-        Current global model weights (e.g., from np.load(..., allow_pickle=True)).
-    client_weights_list : list of (list of np.ndarray)
-        client_weights_list[k] is the list of layer-weight arrays for client k,
-        same shapes as global_weights.
-    client_num_samples : array-like of shape (K,)
-        Number of training samples used by each client k.
-    gamma : float
-        RBF kernel width parameter. Similarity = exp(-gamma * ||u_i - u_j||^2),
-        where u_i is the flattened update vector for client i.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    new_global_weights : list of np.ndarray
-        Updated global weights after hybrid aggregation.
-    """
-    print("Into rbf aggregation")
-    # num_clients = len(client_weights_list)
-
-
-    if num_clients == 0:
-        # Nothing to aggregate
-        return [w.copy() for w in global_weights]
-
-    # ----- 1) Compute client updates relative to global -----
-    client_updates = []
-    for k in range(num_clients):
-        cw = client_dict[str(agent_list[k])]
-        client_updates.append(cw)
-
-
-    # ----- 2) Flatten updates for similarity computation -----
-    flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
-
-    # ----- 3) RBF similarity matrix between client updates -----
-    # pairwise squared distances
-    # shape: (K, K)
-    X = flat_updates
-    sq_norms = np.sum(X * X, axis=1, keepdims=True)          # (K,1)
-
-    sq_dists = sq_norms + sq_norms.T - 2.0 * (X @ X.T)       # (K,K)
-    sq_dists = np.maximum(sq_dists, 0.0)
-    off = sq_dists[~np.eye(num_clients, dtype=bool)]
-    gamma = 1.0 / (np.median(off) + eps)
- 
-    # RBF kernel
-    sim_matrix = np.exp(-gamma * sq_dists)  # (K, K)
-
-    # Row-based similarity score per client (sum or mean are both fine; we’ll sum)
-    np.fill_diagonal(sim_matrix, 0.0)   # remove self-sim
-    sim_scores = sim_matrix.sum(axis=1)  # shape (K,)
-    sim_scores = np.maximum(sim_scores, eps)
-    sim_scores = sim_scores / (sim_scores.sum() + eps)  # normalize to sum 1
-
-    # ----- 4) FedAvg-style sample weights -----
-    sample_w = np.asarray(client_num_samples, dtype=float)
-    sample_w = np.maximum(sample_w, 0.0)
-    if sample_w.sum() <= 0:
-        # fallback to uniform if something weird
-        sample_w = np.ones_like(sample_w)
-    sample_w = sample_w / (sample_w.sum() + eps)
-
-    # ----- 5) Combine FedAvg weights and similarity (multiplicatively) -----
-    # Option: product then renormalize
-    combined_w = sample_w * sim_scores
-    combined_w = np.maximum(combined_w, eps)
-    combined_w = combined_w / (combined_w.sum() + eps)  # final weights sum to 1
-
-    # ----- 6) Apply weighted average of updates to global weights -----
-    new_global_weights = []
-    for layer_idx in range(len(global_weights)):
-        # weighted sum of client updates for this layer
-        agg_update_layer = sum(
-            combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
-        )
-        new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
-
-    return new_global_weights
-
 
 
 
@@ -637,7 +542,7 @@ def aggregate_with_rbf_and_aging(
 
     for k in range(num_clients):
         entry = client_dict[str(agent_list[k])]
-        t_u = entry.get("time", None)
+        t_u = client_dict[str(agent_list[k]) + "_time"]
         client_updates.append(entry)
         client_times.append(t_u)
 
@@ -694,6 +599,7 @@ def aggregate_with_rbf_and_aging(
     combined_w = sample_w * sim_scores * age_scores
     combined_w = np.maximum(combined_w, eps)
     combined_w = combined_w / (combined_w.sum() + eps)
+    print("combined weights with rbf and aging:", combined_w)
 
     # ----- 7) Apply weighted average of updates to global weights -----
     new_global_weights = []

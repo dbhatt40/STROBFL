@@ -25,8 +25,8 @@ def dir_name_fn(args):
     # dir_name = 'weights/k{}_E{}_B{}_C{%e}_lr{}'
     output_file_name = 'output'
 
-    output_dir_name = 'output_files/%s/%s/T%s_k%s_C%s_B%s' % (
-        args.dataset, args.optimizer, args.T, args.k, args.C, args.B)
+    output_dir_name = 'output_files/%s/%s-%s/N%d_M%s_A%d_I%d' % (
+        args.dataset, args.optimizer, args.gar, args.ndrift,args.dmode,args.arate, args.ifactor)
 
     figures_dir_name = 'figures/%s/%s/k%s_C%s_B%s' % (
         args.dataset, args.optimizer, args.k, args.C, args.B)
@@ -85,10 +85,12 @@ def init():
     parser.add_argument("--T", type=int, default=40, help="max time_steps")
     parser.add_argument("--B", type=int, default=25, help="agent batch size")
     parser.add_argument("--gar", type=str, default='avg', help="server aggregation rule")
-    parser.add_argument("--ndrift", type=str, default=0, help="number drifted clients")
-    parser.add_argument("--tdrift", type=str, default='shared', help="type of drift - shared/independent")
-    parser.add_argument("--imb", type=str, default=0.3, help="imbalance factor")
     
+    parser.add_argument("--ndrift", type=int, default=0, help="number drifted clients")
+    parser.add_argument("--dmode", type=str, default='shared', help="type of drift - shared/independent")
+    parser.add_argument("--ifactor", type=int, default=0.3, help="imbalance factor")
+    parser.add_argument("--arate", type=int, default=1.0, help="imbalance factor")
+
 
     parser.add_argument("--steps", type=int, default=None,
                         help="GD steps per agent")
