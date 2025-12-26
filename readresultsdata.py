@@ -13,6 +13,12 @@ from glob import glob
 
 files = []
 
+files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/adam-avg/D4IImbalance0/output_global_eval_loss.txt")
+
+
+
+
 #files  += glob("./data/synthetic-class1/strobfl-strobfl/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/adam-avg/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 
@@ -22,14 +28,18 @@ files = []
 files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/adam-avg/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 
-#files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/adam-avg/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/adam-avg/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
+
+files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0.6/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/adam-avg/D4IImbalance0/output_global_eval_loss.txt")
+
 
 #files  += glob("./data/synthetic-class1/strobfl-avg/d1output_global_eval_loss.txt")
 # files  += glob("./data/synthetic-class1/strobfl-avg/d4ioutput_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/strobfl-avg/d4soutput_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/strobfl-avg/d0output_global_eval_loss.txt")
-files  += glob("./data/synthetic-class1/strobfl-strobfl/ArrivalRate2/d4ioutput_global_eval_loss.txt")
+#files  += glob("./data/synthetic-class1/strobfl-strobfl/ArrivalRate2/d4ioutput_global_eval_loss.txt")
 
 
 
@@ -38,14 +48,18 @@ for f in files:
     print(f)
 
 dfs = []
-methods = ['STROBFL-4DI/Arrival Rate 0.3', 'STROBFL-4DI/Arrival Rate 2.0']
+methods = ['STROBFL- 0', 'STROBFL - 0.3', 'STROBFL - 0.6']
 #methods = ['Adam-No Drift','STROBFL-No Drift','Adam-4D/I','STROBFL-4D/I','Adam-4D/S','STROBFL-4D/S']
 
-
+values = []
 
 i = 0
 for f in files:
     df = pd.read_csv(f)
+    # col = df.iloc[:,1]
+    # print(f"{f} -> min: {col.min()}, max: {col.max()}")
+    # values.append(col.mean()) 
+    # print(values)
 
     # extract directory names for labeling
     level1 = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
@@ -89,8 +103,8 @@ ax.legend(
 )
 plt.xlabel("Round (t)")
 plt.ylabel("Validation Accuracy (%)")
-plt.title("Server Validation Accuracy across rounds (Different Arrival Rates)")
-# plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
+plt.title("Server Validation Accuracy across rounds (Imbalance Variation)")
+plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
 plt.tight_layout()
 plt.show()
 

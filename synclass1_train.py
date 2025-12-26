@@ -22,7 +22,7 @@ from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
 from utils.eval_utils import eval_func
-from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging, aggregate_with_rbf
+from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging
 from synclass1_agents import synclass1_agent
 
 
@@ -47,17 +47,23 @@ def synclass1_train_fn(return_dict, results_dict):
 
     r = [1 for i in range(0,k)]
 	
-    print('number drifted:{},driftmode:{},arrivalrate:{},imbalance:{}'.format(gv.ndrift, gv.dmode, gv.arate, gv.ifactor))
+    print('number drifted:{},driftmode:{},arrivalrate:{},imbalance:{},training_batch:{}'.format(gv.ndrift, gv.dmode, gv.arate, gv.ifactor, gv.B))
+    ndrift = gv.ndrift
+    dmode = gv.dmode
+    arate = gv.arate
+    ifactor = gv.ifactor
+  
+    
     gen = federated_mixed_drift_stream_with_queues(
     num_rounds=T,
     num_clients=k,
     batch_size=gv.WINDOW_SIZE,
-    num_drifted_clients=0,
-    drift_clients_mode="independent",  # or "shared"
-    arrival_rate=1.0,
+    num_drifted_clients=ndrift,
+    drift_clients_mode=dmode,  # or "shared"
+    arrival_rate=arate,
     test_batch_size=256,
     noise_std=0.2,
-    imbalance_factor=0.3,
+    imbalance_factor=ifactor,
     samples_per_cycle=100000,
     random_state=42,
     )

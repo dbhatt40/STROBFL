@@ -335,10 +335,10 @@ def federated_mixed_drift_stream_with_queues(
             random_state=rng.integers(1_000_000) + 10_000 + cid,
         )
 
-    # One global test stream: drifting
+    # One global test stream: not drifting
     test_stream = StationaryStream4Class(
         noise_std=noise_std,
-        imbalance_factor=imbalance_factor,        
+        imbalance_factor=0,        
         random_state=rng.integers(1_000_000),
     )
 
@@ -464,18 +464,28 @@ def federated_mixed_drift_stream_with_queues(
                     else:
                         _force_insert(cid, sample)
 
-            # 2) Ensure we have at least batch_size samples
-            if len(q) < batch_size:
-                missing = batch_size - len(q)
-                X_extra, y_extra, t_extra = stream.sample_batch(missing)
-                for i in range(missing):
-                    sample = (X_extra[i], int(y_extra[i]), float(t_extra[i]))
-                    # For "topping up", just force insert (we need the batch).
-                    _force_insert(cid, sample)
+# =============================================================================
+#             # 2) Ensure we have at least batch_size samples
+#             if len(q) < batch_size:
+#                 missing = batch_size - len(q)
+#                 X_extra, y_extra, t_extra = stream.sample_batch(missing)
+#                 for i in range(missing):
+#                     sample = (X_extra[i], int(y_extra[i]), float(t_extra[i]))
+#                     # For "topping up", just force insert (we need the batch).
+#                     _force_insert(cid, sample)
+# =============================================================================
+            if arrival_rate < 1.0:
+    # Don't top-up, just use what's available
+                batch_len = min(len(q), batch_size)
+            else:
+    # For normal/high arrival rates, enforce full batch
+                batch_len = batch_size
+
+
 
             # 3) Pop batch for this client (and update stats accordingly)
-            batch_samples = q[:batch_size]
-            del q[:batch_size]
+            batch_samples = q[:batch_len]
+            del q[:batch_len]
 
             for x_b, y_b, t_b in batch_samples:
                 _stats_remove(cid, x_b, y_b)

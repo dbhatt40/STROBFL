@@ -132,6 +132,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 	
 
     args = gv.init()
+    train_batchsize = gv.B
     if lr is None:
         lr = args.eta
     print('Agent %s on GPU %s' % (current_agent,gpu_id))
@@ -149,7 +150,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
     num_classes = gv.NUM_CLASSES
     batch_size = len(x_batch)
-    train_batchsize=gv.B
+
     num_steps = int(batch_size/train_batchsize)
    
 # Global step (optional but useful)
@@ -304,98 +305,79 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
           w = w / w.mean()
                
           # print("For step: {} X_batch: {}, Y_batch: {}".format(step, X_batch, Y_batch))
-          fetch_ops = [
-           train_op,
-           weighted_loss,
-           per_label_loss,
-           f1_macro,
-           f1_per_label
-           ]
-
-
+    
           pred_op = tf.argmax(logits, axis=1, output_type=tf.int32)
-          fetch_ops = [train_op, loss, per_label_loss, f1_macro, f1_per_label, pred_op]
+          fetch_ops = [train_op, weighted_loss, per_label_loss, f1_macro, f1_per_label, pred_op]
           _, loss_val, pll_val, f1m_val, f1l_val, pred_val = sess.run(
                                   fetch_ops, feed_dict={x: X_batch, y: Y_batch, class_w_ph: w})
-          
-
-
-# =============================================================================
-#         print("true counts:", np.bincount(Y_batch.astype(np.int32), minlength=gv.NUM_CLASSES))
-#         print("pred counts:", np.bincount(pred_val.astype(np.int32), minlength=gv.NUM_CLASSES))
-#         print("first 20 (y,p):", list(zip(Y_batch[:20], pred_val[:20])))
-# 
-# =============================================================================
-        # print('loss {}, p1l_val {}, f1mval {}, f1l {}'.format(loss_val, pll_val, f1m_val, f1l_val))
-        
-        pll_val = np.nan_to_num(pll_val, nan=0.0)
-        f1l_val = np.nan_to_num(f1l_val, nan=0.0)
+          pll_val = np.nan_to_num(pll_val, nan=0.0)
+          f1l_val = np.nan_to_num(f1l_val, nan=0.0)
 
 # scalar loss EMA
-        if loss_ema is None:
+          if loss_ema is None:
             loss_ema = loss_val
-        else:
+          else:
             loss_ema = ema_beta * loss_ema + (1.0 - ema_beta) * loss_val
 
-        unstable, stats = stab.update(loss_ema)
+          unstable, stats = stab.update(loss_ema)
 
 # per-label loss EMA
-        if pll_ema is None:
+          if pll_ema is None:
             pll_ema = pll_val.copy()
-        else:
+          else:
             pll_ema = ema_beta * pll_ema + (1.0 - ema_beta) * pll_val
 
 # per-label F1 EMA (good since same-batch F1 is noisy)
-        if f1l_ema is None:
+          if f1l_ema is None:
             f1l_ema = f1l_val.copy()
-        else:
+          else:
             f1l_ema = ema_beta * f1l_ema + (1.0 - ema_beta) * f1l_val
 
 # ---- Drift detection (PH per label) ----
-        any_drift  = False
-        loss_drift = False
-        f1_drift   = False
-        unstable = False
+          any_drift  = False
+          loss_drift = False
+          f1_drift   = False
+          unstable = False
 
-        MIN_COUNT_LOSS = int(train_batchsize/gv.NUM_CLASSES)
-        MIN_COUNT_F1   = int(train_batchsize/gv.NUM_CLASSES)*2
+          MIN_COUNT_LOSS = int(train_batchsize/gv.NUM_CLASSES)
+          MIN_COUNT_F1   = int(train_batchsize/gv.NUM_CLASSES)*2
 
-        label_counts = np.bincount(Y_batch, minlength=gv.NUM_CLASSES)
+          label_counts = np.bincount(Y_batch, minlength=gv.NUM_CLASSES)
 
-        for c in range(num_classes):
-            loss_c = float(pll_ema[c])
-            f1_c   = float(f1l_ema[c])
+          for c in range(num_classes):
+             loss_c = float(pll_ema[c])
+             f1_c   = float(f1l_ema[c])
 
-            loss_history_per_label[c].append(loss_c)
-            f1_history_per_label[c].append(f1_c)
+             loss_history_per_label[c].append(loss_c)
+             f1_history_per_label[c].append(f1_c)
 
     # loss PH
-            if label_counts[c] >= MIN_COUNT_LOSS:
-              ld = loss_ph_per_label[c].update(loss_c)
-              loss_drift |= ld
-              any_drift |= ld
+             if label_counts[c] >= MIN_COUNT_LOSS:
+               ld = loss_ph_per_label[c].update(loss_c)
+               loss_drift |= ld
+               any_drift |= ld
 
     # F1 PH (use -F1, but only if enough support)
-            if label_counts[c] >= MIN_COUNT_F1:
-             fd = f1_ph_per_label[c].update(-f1_c)
-             f1_drift  |= fd
-             any_drift |= ld
+             if label_counts[c] >= MIN_COUNT_F1:
+               fd = f1_ph_per_label[c].update(-f1_c)
+               f1_drift  |= fd
+               any_drift |= ld
 
 # ---- Adapt EMA alpha based on drift ----
 
-            if (unstable or any_drift):
-               steps_since_drift = 0
-               if unstable:
-                 sess.run(reset_ema_op)
-                 sess.run(alpha_var.assign(alpha_unstable))
-                 sess.run(lr_var.assign(lr_unstable)) 
-               elif loss_drift and f1_drift:
+             if (unstable or any_drift):
+                steps_since_drift = 0
+                if unstable:
+                   sess.run(reset_ema_op)
+                   sess.run(alpha_var.assign(alpha_unstable))
+                   sess.run(lr_var.assign(lr_unstable)) 
+                elif loss_drift and f1_drift:
                    sess.run(alpha_var.assign(alpha_lfdrift))
                    sess.run(lr_var.assign(lr_lfdrift))                 
-               elif loss_drift:
+                elif loss_drift:
                   sess.run(alpha_var.assign(alpha_ldrift))
                   sess.run(lr_var.assign(lr_ldrift))                
-            else:
+             else:
                 steps_since_drift += 1
                 if steps_since_drift >= cooldown_steps:
                     sess.run(alpha_var.assign(alpha_stable))
@@ -417,7 +399,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
     
     seed=None
-    max_delay_s = 1.0  # max 2 sec delay
+    max_delay_s = 0.8 # max 2 sec delay
     rng = np.random.default_rng(seed if seed is not None else (12345 + current_agent))
     if rng.random() < 0.3:    # delay only some clients
       delay = rng.exponential(scale=0.5)   # mean 0.5s

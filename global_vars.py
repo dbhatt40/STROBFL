@@ -88,8 +88,8 @@ def init():
     
     parser.add_argument("--ndrift", type=int, default=0, help="number drifted clients")
     parser.add_argument("--dmode", type=str, default='shared', help="type of drift - shared/independent")
-    parser.add_argument("--ifactor", type=int, default=0.3, help="imbalance factor")
-    parser.add_argument("--arate", type=int, default=1.0, help="imbalance factor")
+    parser.add_argument("--ifactor", type=float, default=0.3, help="imbalance factor")
+    parser.add_argument("--arate", type=float, default=1.0, help="imbalance factor")
 
 
     parser.add_argument("--steps", type=int, default=None,
@@ -153,6 +153,7 @@ def init():
 
 
     global NUM_CLASSES, BATCH_SIZE, WINDOW_SIZE, DATA_DIM, NUM_DRIFTED 
+
     BATCH_SIZE = None
     NUM_CLASSES = None
     WINDOW_SIZE = None
@@ -161,6 +162,7 @@ def init():
     BATCH_SIZE = args.B
     
     global T,C, k, gar
+    global ndrift, dmode, arate, ifactor, B
     T = None
     C = None
     k = None
@@ -170,6 +172,15 @@ def init():
     C = args.C
     k = args.k
     gar = args.gar
+    ndrift = 0
+    dmode = 'Shared'
+    arate = 1.0
+    ifactor = 0.3
+    ndrift = args.ndrift
+    dmode = args.dmode
+    arate = args.arate
+    ifactor = args.ifactor
+    B = args.B
 
     global max_acc
 
