@@ -227,7 +227,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         alpha_var = tf.Variable(alpha_stable, trainable=False,
                         dtype=tf.float32, name="ema_alpha")
         # EMA-based update rule using alpha_var
-        ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
+        ema_rule = gradient_update_rule_factory(alpha=alpha_var, name_prefix="grad_ema")
      
         optimizer = CustomRuleSGD(learning_rate=lr_var, update_rule=ema_rule)
         train_op = optimizer.minimize(weighted_loss, global_step=global_step)
@@ -399,7 +399,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
     
     seed=None
-    max_delay_s = 0.8 # max 2 sec delay
+    max_delay_s = 0.6 # max 2 sec delay
     rng = np.random.default_rng(seed if seed is not None else (12345 + current_agent))
     if rng.random() < 0.3:    # delay only some clients
       delay = rng.exponential(scale=0.5)   # mean 0.5s

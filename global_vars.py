@@ -25,7 +25,7 @@ def dir_name_fn(args):
     # dir_name = 'weights/k{}_E{}_B{}_C{%e}_lr{}'
     output_file_name = 'output'
 
-    output_dir_name = 'output_files/%s/%s-%s/N%d_M%s_A%d_I%d' % (
+    output_dir_name = 'output_files/%s/%s-%s/N%d_M%s_A%.1f_I%.1f' % (
         args.dataset, args.optimizer, args.gar, args.ndrift,args.dmode,args.arate, args.ifactor)
 
     figures_dir_name = 'figures/%s/%s/k%s_C%s_B%s' % (

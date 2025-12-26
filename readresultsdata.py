@@ -13,10 +13,12 @@ from glob import glob
 
 files = []
 
-files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0/output_global_eval_loss.txt")
-# files  += glob("./data/synthetic-class1/adam-avg/D4IImbalance0/output_global_eval_loss.txt")
+files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I0/output_global_eval_loss.txt")
+files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I3/output_global_eval_loss.txt")
+files  += glob("./data/synthetic-class1/adam-avg/D0I0/output_global_eval_loss.txt")
 
 
+files  += glob("./data/synthetic-class1/adam-avg/D0I3/output_global_eval_loss.txt")
 
 
 #files  += glob("./data/synthetic-class1/strobfl-strobfl/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
@@ -25,13 +27,13 @@ files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0/output_glo
 #files  += glob("./data/synthetic-class1/strobfl-strobfl/D1-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/adam-avg/D1-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 
-files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 #files  += glob("./data/synthetic-class1/adam-avg/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 
 # files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 # files  += glob("./data/synthetic-class1/adam-avg/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
 
-files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0.6/output_global_eval_loss.txt")
+# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0.6/output_global_eval_loss.txt")
 # files  += glob("./data/synthetic-class1/adam-avg/D4IImbalance0/output_global_eval_loss.txt")
 
 
@@ -48,7 +50,7 @@ for f in files:
     print(f)
 
 dfs = []
-methods = ['STROBFL- 0', 'STROBFL - 0.3', 'STROBFL - 0.6']
+methods = ['STROBFL- 0', 'STROBFL - 0.3', 'STROBFL - 0.6', 'STROBFL - 1.0']
 #methods = ['Adam-No Drift','STROBFL-No Drift','Adam-4D/I','STROBFL-4D/I','Adam-4D/S','STROBFL-4D/S']
 
 values = []
