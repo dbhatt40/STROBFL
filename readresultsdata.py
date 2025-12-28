@@ -16,8 +16,6 @@ files = []
 files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I0/output_global_eval_loss.txt")
 files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I3/output_global_eval_loss.txt")
 files  += glob("./data/synthetic-class1/adam-avg/D0I0/output_global_eval_loss.txt")
-
-
 files  += glob("./data/synthetic-class1/adam-avg/D0I3/output_global_eval_loss.txt")
 
 

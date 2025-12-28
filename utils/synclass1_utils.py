@@ -334,15 +334,40 @@ def federated_mixed_drift_stream_with_queues(
             imbalance_factor=imbalance_factor,
             random_state=rng.integers(1_000_000) + 10_000 + cid,
         )
+        
+    test_streams = [None] * num_clients
+    # --- Create analogous test streams so test has same drift/stationary structure as clients ---
 
-    # One global test stream: not drifting
-    test_stream = StationaryStream4Class(
-        noise_std=noise_std,
-        imbalance_factor=0,        
-        random_state=rng.integers(1_000_000),
-    )
+# Drifted test "clients"
+    for cid in stationary_client_ids:
+        test_streams[cid] = StationaryStream4Class(
+            noise_std=noise_std,
+            imbalance_factor=imbalance_factor,
+            random_state=rng.integers(1_000_000) + 2_000_000 + cid,
+            ) 
+    if num_drifted_clients > 0:
+        if drift_clients_mode == "shared":
+        # one shared drifting test stream
+            shared_test_stream = DriftStream4Class(
+                noise_std=noise_std,
+                imbalance_factor=imbalance_factor,
+                samples_per_cycle=samples_per_cycle,
+                random_state=rng.integers(1_000_000) + 999_000,
+                )
+            for cid in drifted_client_ids:
+                test_streams[cid] = shared_test_stream
+        elif drift_clients_mode == "independent":
+            for cid in drifted_client_ids:
+               phase_offset = int(rng.integers(0, samples_per_cycle))
+               test_streams[cid] = DriftStream4Class(
+                            noise_std=noise_std,
+                            imbalance_factor=imbalance_factor,
+                            samples_per_cycle=samples_per_cycle,
+                            random_state=rng.integers(1_000_000) + 1_000_000 + cid,
+                            initial_step=phase_offset,
+                            )
 
-    # Per-client queues of (x, y, t)
+     # Per-client queues of (x, y, t)
     queues = [[] for _ in range(num_clients)]
 
     # NEW: per-client per-label queue stats
@@ -401,49 +426,15 @@ def federated_mixed_drift_stream_with_queues(
         x, y, t = sample
         x = x.astype(np.float64)  # use float64 for stable stats
 
-        # Case 1: label not present yet in queue -> insert, delete oldest overall if full
-        if label_count[cid][y] == 0:
-            if len(q) >= queue_maxlen:
+        # Case 1:  delete oldest overall if full
+        if len(q) >= queue_maxlen:
                 x_old, y_old, t_old = q.pop(0)
                 _stats_remove(cid, x_old, y_old)
-            q.append((x.astype(np.float32), y, t))
-            _stats_insert(cid, x, y)
-            return True
+                q.append((x.astype(np.float32), y, t))
+                _stats_insert(cid, x, y)
+        return True
 
-        # Label already present: compute distance from mean and compare to avg variance
-        mean_y, avg_var_y = _label_mean_var(cid, y)
-
-        # If for some reason no stats (shouldn't happen), just fallback to force insert
-        if mean_y is None or avg_var_y is None:
-            _force_insert(cid, (x.astype(np.float32), y, t))
-            return True
-
-        diff = x - mean_y
-        dist2 = float(np.mean(diff * diff))  # average squared distance across dims
-
-        # If avg_var_y is zero (or tiny), treat as all new => admit
-        threshold = var_threshold_factor * (avg_var_y if avg_var_y > 1e-12 else 1e-12)
-
-        # Case 2: distance from mean exceeds threshold -> insert, remove oldest sample with same label
-        if dist2 > threshold:
-            if len(q) >= queue_maxlen:
-                idx_to_remove = None
-                for idx, (x_old, y_old, t_old) in enumerate(q):
-                    if y_old == y:
-                        idx_to_remove = idx
-                        break
-                if idx_to_remove is None:
-                    idx_to_remove = 0  # fallback
-                x_old, y_old, t_old = q.pop(idx_to_remove)
-                _stats_remove(cid, x_old, y_old)
-
-            q.append((x.astype(np.float32), y, t))
-            _stats_insert(cid, x, y)
-            return True
-
-        # Case 3: variance threshold not exceeded -> discard sample
-        return False
-
+       
     arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
     use_policy = arrival_rate > 1.0
 
@@ -464,24 +455,12 @@ def federated_mixed_drift_stream_with_queues(
                     else:
                         _force_insert(cid, sample)
 
-# =============================================================================
-#             # 2) Ensure we have at least batch_size samples
-#             if len(q) < batch_size:
-#                 missing = batch_size - len(q)
-#                 X_extra, y_extra, t_extra = stream.sample_batch(missing)
-#                 for i in range(missing):
-#                     sample = (X_extra[i], int(y_extra[i]), float(t_extra[i]))
-#                     # For "topping up", just force insert (we need the batch).
-#                     _force_insert(cid, sample)
-# =============================================================================
             if arrival_rate < 1.0:
     # Don't top-up, just use what's available
                 batch_len = min(len(q), batch_size)
             else:
     # For normal/high arrival rates, enforce full batch
                 batch_len = batch_size
-
-
 
             # 3) Pop batch for this client (and update stats accordingly)
             batch_samples = q[:batch_len]
@@ -496,10 +475,43 @@ def federated_mixed_drift_stream_with_queues(
 
             client_batches.append((X_c, y_c, t_c))
 
-        # 4) Test batch (drifting)
-        X_test, y_test, t_test = test_stream.sample_batch(test_batch_size)
+       
+        # 4) Test batch: same structure as client[cid]
+#    - each "test client" contributes some samples
+#    - ratio drifted / stationary matches num_drifted_clients / num_clients
 
-        yield r, client_batches, (X_test, y_test, t_test)
+# Base number of test samples per client
+    base_n = test_batch_size // num_clients
+    remainder = test_batch_size % num_clients  # distribute leftover
+
+    X_test_list = []
+    y_test_list = []
+    t_test_list = []
+
+    for cid in range(num_clients):
+        stream = test_streams[cid]
+    # Give first 'remainder' clients one extra sample
+        n_c = base_n + (1 if cid < remainder else 0)
+        if n_c <= 0:
+            continue
+
+        X_c_test, y_c_test, t_c_test = stream.sample_batch(n_c)
+        X_test_list.append(X_c_test)
+        y_test_list.append(y_c_test)
+        t_test_list.append(t_c_test)
+
+# Concatenate into one global test batch
+    X_test = np.concatenate(X_test_list, axis=0)
+    y_test = np.concatenate(y_test_list, axis=0)
+    t_test = np.concatenate(t_test_list, axis=0)
+
+# (optional) sanity: shuffle test batch
+    idx = np.random.permutation(len(X_test))
+    X_test = X_test[idx]
+    y_test = y_test[idx]
+    t_test = t_test[idx]
+    yield r, client_batches, (X_test, y_test, t_test)
+
 
 
 def synclass1_model():
