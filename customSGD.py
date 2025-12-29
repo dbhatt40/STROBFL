@@ -52,13 +52,12 @@ def shrink_rule(grad, var, lr_t, global_step):
       return lr_t * (grad + wd * var)
 
 
-def gradient_update_rule_factory(alpha_var, name_prefix="grad_ema"):
+def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
     """
     Returns an update_rule(grad, var, lr_t, global_step) that:
       m_t = alpha * m_{t-1} + (1 - alpha) * grad
       u_t = (1 - alpha) * grad + alpha * m_t
       delta = lr_t * u_t
-    where alpha is a tf.Variable you can change from Python.
     """
     slots = {}  # maps var.ref() -> tf.Variable (EMA slot)
 
@@ -66,36 +65,43 @@ def gradient_update_rule_factory(alpha_var, name_prefix="grad_ema"):
         key = var.ref()
         if key not in slots:
             slots[key] = tf.Variable(
-                tf.zeros_like(var), trainable=False,
+                tf.zeros_like(var),
+                trainable=False,
                 name=f"{name_prefix}/{var.op.name.replace(':','_')}"
             )
         return slots[key]
 
     def update_rule(grad, var, lr_t, global_step):
+        # Handle IndexedSlices by densifying
         if isinstance(grad, tf.IndexedSlices):
             grad = tf.convert_to_tensor(grad)
 
         m = _slot_for(var)
 
-        # Cast alpha_var to match var dtype
-        alpha_t = tf.cast(alpha_var, var.dtype.base_dtype)
+        # alpha can be a float, tensor, or tf.Variable
+        alpha_t = tf.cast(alpha, var.dtype.base_dtype)
 
-        # m_t = alpha*m + (1-alpha)*grad
+        # EMA: m_t = alpha * m + (1 - alpha) * grad
         m_t = m.assign(alpha_t * m + (1.0 - alpha_t) * grad)
 
         with tf.control_dependencies([m_t]):
             upd = (1.0 - alpha_t) * grad + alpha_t * m_t
-            delta = lr_t * upd
+            delta = lr_t * upd  # amount to SUBTRACT from var
             return tf.identity(delta, name="ema_blend_delta")
 
+    # Expose EMA slots if you want to inspect them
     update_rule.ema_slots = slots
-    
+
+    # ---- NEW: reset op for EMA slots ----
     def make_reset_op():
-    # IMPORTANT: slots only exist after first time update_rule is used to build graph
-       return tf.group(*[s.assign(tf.zeros_like(s)) for s in slots.values()],
-                    name=f"{name_prefix}_reset")
+        reset_ops = [m.assign(tf.zeros_like(m)) for m in slots.values()]
+        if not reset_ops:
+            # if called before any slot is created, just no-op
+            return tf.no_op(name=f"{name_prefix}_reset_noop")
+        return tf.group(*reset_ops, name=f"{name_prefix}_reset")
 
     update_rule.make_reset_op = make_reset_op
+
     return update_rule
 
 

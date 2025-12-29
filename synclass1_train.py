@@ -67,6 +67,8 @@ def synclass1_train_fn(return_dict, results_dict):
     samples_per_cycle=100000,
     random_state=42,
     )
+    
+
 	
 
     for round_idx, client_batches, test_batch in gen:

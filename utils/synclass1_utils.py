@@ -288,22 +288,53 @@ def federated_mixed_drift_stream_with_queues(
              => insert, evict oldest sample of same label (fallback: oldest overall).
           3) Else discard the sample.
     """
+    def _force_insert(cid, sample):
+        """
+        Sliding-window insert: if queue is full, evict oldest overall.
+        Always inserts the new sample, updating stats accordingly.
+        """
+        q = queues[cid]
+        x, y, t = sample
+        if len(q) >= queue_maxlen:
+            x_old, y_old, t_old = q.pop(0)
+        q.append((x, y, t))
 
+    def _insert_with_policy(cid, sample):
+        """
+        Insert or discard a sample based on the user's rules
+        when arrival_rate > 1.
+        """
+        q = queues[cid]
+        x, y, t = sample
+        x = x.astype(np.float64)  # use float64 for stable stats
+
+        # Case 1:  delete oldest overall if full
+        if len(q) >= queue_maxlen:
+                x_old, y_old, t_old = q.pop(0)
+                q.append((x.astype(np.float32), y, t))
+        return True
+    
     assert 0 <= num_drifted_clients <= num_clients, "num_drifted_clients must be between 0 and num_clients"
 
     rng = np.random.default_rng(random_state)
-    num_labels = 4       # classes 0..3
-    feat_dim = 2         # x is 2-D
+
     if queue_maxlen is None:
         queue_maxlen = batch_size
+    queues = [[] for _ in range(num_clients)]
+
+    arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
+    use_policy = arrival_rate > 1.0
 
     # Decide which client IDs are drifted.
     drifted_client_ids = list(range(num_drifted_clients))
     stationary_client_ids = list(range(num_drifted_clients, num_clients))
 
     client_streams = [None] * num_clients
+     # Per-client queues of (x, y, t)
+
 
     # --- Create streams for drifted clients ---
+#-----------------------------
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
             shared_stream = DriftStream4Class(
@@ -326,7 +357,7 @@ def federated_mixed_drift_stream_with_queues(
                 )
         else:
             raise ValueError("drift_clients_mode must be 'independent' or 'shared'")
-
+#-------------------------
     # --- Create streams for stationary clients ---
     for cid in stationary_client_ids:
         client_streams[cid] = StationaryStream4Class(
@@ -334,6 +365,7 @@ def federated_mixed_drift_stream_with_queues(
             imbalance_factor=imbalance_factor,
             random_state=rng.integers(1_000_000) + 10_000 + cid,
         )
+#-------------------------
         
     test_streams = [None] * num_clients
     # --- Create analogous test streams so test has same drift/stationary structure as clients ---
@@ -342,7 +374,7 @@ def federated_mixed_drift_stream_with_queues(
     for cid in stationary_client_ids:
         test_streams[cid] = StationaryStream4Class(
             noise_std=noise_std,
-            imbalance_factor=imbalance_factor,
+            imbalance_factor=0,
             random_state=rng.integers(1_000_000) + 2_000_000 + cid,
             ) 
     if num_drifted_clients > 0:
@@ -366,77 +398,7 @@ def federated_mixed_drift_stream_with_queues(
                             random_state=rng.integers(1_000_000) + 1_000_000 + cid,
                             initial_step=phase_offset,
                             )
-
-     # Per-client queues of (x, y, t)
-    queues = [[] for _ in range(num_clients)]
-
-    # NEW: per-client per-label queue stats
-    # shape: (num_clients, num_labels, feat_dim)
-    label_sum   = [np.zeros((num_labels, feat_dim), dtype=np.float64) for _ in range(num_clients)]
-    label_sumsq = [np.zeros((num_labels, feat_dim), dtype=np.float64) for _ in range(num_clients)]
-    label_count = [np.zeros(num_labels, dtype=np.int64)               for _ in range(num_clients)]
-
-    def _stats_insert(cid, x, y):
-        """Update per-label stats for insertion."""
-        label_sum[cid][y]   += x
-        label_sumsq[cid][y] += x * x
-        label_count[cid][y] += 1
-
-    def _stats_remove(cid, x, y):
-        """Update per-label stats for removal."""
-        label_sum[cid][y]   -= x
-        label_sumsq[cid][y] -= x * x
-        label_count[cid][y] -= 1
-
-    def _label_mean_var(cid, y):
-        """
-        Return (mean_vec, avg_variance_scalar) for label y
-        based on samples currently in client's queue.
-        """
-        c = label_count[cid][y]
-        if c <= 0:
-            return None, None
-        s  = label_sum[cid][y]
-        ss = label_sumsq[cid][y]
-        mean = s / float(c)
-        var_vec = ss / float(c) - mean * mean
-        var_vec = np.maximum(var_vec, 0.0)  # numerical safety
-        avg_var = float(np.mean(var_vec))
-        return mean, avg_var
-
-    def _force_insert(cid, sample):
-        """
-        Sliding-window insert: if queue is full, evict oldest overall.
-        Always inserts the new sample, updating stats accordingly.
-        """
-        q = queues[cid]
-        x, y, t = sample
-        if len(q) >= queue_maxlen:
-            x_old, y_old, t_old = q.pop(0)
-            _stats_remove(cid, x_old, y_old)
-        q.append((x, y, t))
-        _stats_insert(cid, x, y)
-
-    def _insert_with_policy(cid, sample):
-        """
-        Insert or discard a sample based on the user's rules
-        when arrival_rate > 1.
-        """
-        q = queues[cid]
-        x, y, t = sample
-        x = x.astype(np.float64)  # use float64 for stable stats
-
-        # Case 1:  delete oldest overall if full
-        if len(q) >= queue_maxlen:
-                x_old, y_old, t_old = q.pop(0)
-                _stats_remove(cid, x_old, y_old)
-                q.append((x.astype(np.float32), y, t))
-                _stats_insert(cid, x, y)
-        return True
-
-       
-    arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
-    use_policy = arrival_rate > 1.0
+#-------------------------
 
     for r in range(num_rounds):
         client_batches = []
@@ -466,9 +428,6 @@ def federated_mixed_drift_stream_with_queues(
             batch_samples = q[:batch_len]
             del q[:batch_len]
 
-            for x_b, y_b, t_b in batch_samples:
-                _stats_remove(cid, x_b, y_b)
-
             X_c = np.stack([s[0] for s in batch_samples], axis=0).astype(np.float32)
             y_c = np.array([s[1] for s in batch_samples], dtype=np.int64)
             t_c = np.array([s[2] for s in batch_samples], dtype=np.float32)
@@ -481,36 +440,37 @@ def federated_mixed_drift_stream_with_queues(
 #    - ratio drifted / stationary matches num_drifted_clients / num_clients
 
 # Base number of test samples per client
-    base_n = test_batch_size // num_clients
-    remainder = test_batch_size % num_clients  # distribute leftover
+        base_n = test_batch_size // num_clients
+        remainder = test_batch_size % num_clients  # distribute leftover
 
-    X_test_list = []
-    y_test_list = []
-    t_test_list = []
+        X_test_list = []
+        y_test_list = []
+        t_test_list = []
 
-    for cid in range(num_clients):
-        stream = test_streams[cid]
+        for cid in range(num_clients):
+                stream = test_streams[cid]
     # Give first 'remainder' clients one extra sample
-        n_c = base_n + (1 if cid < remainder else 0)
-        if n_c <= 0:
-            continue
+                n_c = base_n + (1 if cid < remainder else 0)
+                if n_c <= 0:
+                   continue
 
-        X_c_test, y_c_test, t_c_test = stream.sample_batch(n_c)
-        X_test_list.append(X_c_test)
-        y_test_list.append(y_c_test)
-        t_test_list.append(t_c_test)
+                X_c_test, y_c_test, t_c_test = stream.sample_batch(n_c)
+                X_test_list.append(X_c_test)
+                y_test_list.append(y_c_test)
+                t_test_list.append(t_c_test)
 
 # Concatenate into one global test batch
-    X_test = np.concatenate(X_test_list, axis=0)
-    y_test = np.concatenate(y_test_list, axis=0)
-    t_test = np.concatenate(t_test_list, axis=0)
+        X_test = np.concatenate(X_test_list, axis=0)
+        y_test = np.concatenate(y_test_list, axis=0)
+        t_test = np.concatenate(t_test_list, axis=0)
 
 # (optional) sanity: shuffle test batch
-    idx = np.random.permutation(len(X_test))
-    X_test = X_test[idx]
-    y_test = y_test[idx]
-    t_test = t_test[idx]
-    yield r, client_batches, (X_test, y_test, t_test)
+        idx = np.random.permutation(len(X_test))
+        X_test = X_test[idx]
+        y_test = y_test[idx]
+        t_test = t_test[idx]
+                
+        yield r, client_batches, (X_test, y_test, t_test)
 
 
 
