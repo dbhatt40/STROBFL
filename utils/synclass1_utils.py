@@ -382,7 +382,7 @@ def federated_mixed_drift_stream_with_queues(
         # one shared drifting test stream
             shared_test_stream = DriftStream4Class(
                 noise_std=noise_std,
-                imbalance_factor=imbalance_factor,
+                imbalance_factor=0,
                 samples_per_cycle=samples_per_cycle,
                 random_state=rng.integers(1_000_000) + 999_000,
                 )
@@ -393,7 +393,7 @@ def federated_mixed_drift_stream_with_queues(
                phase_offset = int(rng.integers(0, samples_per_cycle))
                test_streams[cid] = DriftStream4Class(
                             noise_std=noise_std,
-                            imbalance_factor=imbalance_factor,
+                            imbalance_factor=0,
                             samples_per_cycle=samples_per_cycle,
                             random_state=rng.integers(1_000_000) + 1_000_000 + cid,
                             initial_step=phase_offset,
