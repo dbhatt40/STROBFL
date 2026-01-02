@@ -34,99 +34,6 @@ from collections import deque
 import time
 
 
-PER_LABEL_STATS = {
-    "sum": None,       # shape: [C, D]
-    "count": None,     # shape: [C]
-    "means": None      # shape: [C, D] (derived)
-}
-
-class LossStabilityTest:
-    def __init__(self, window=10, min_increase=0.4, std_mult=3.0):
-        self.window = int(window)
-        self.min_increase = float(min_increase)
-        self.std_mult = float(std_mult)
-        self.buf = deque(maxlen=self.window)
-
-    def update(self, loss_val):
-        self.buf.append(float(loss_val))
-        if len(self.buf) < self.window:
-            return False, {}
-
-        arr = np.array(self.buf, dtype=np.float32)
-        half = self.window // 2
-        early = arr[:half]
-        late  = arr[half:]
-
-        early_mean, late_mean = float(early.mean()), float(late.mean())
-        early_std,  late_std  = float(early.std() + 1e-8), float(late.std() + 1e-8)
-
-        mean_up = (late_mean - early_mean) / max(early_mean, 1e-8) > self.min_increase
-        std_up  = late_std > self.std_mult * early_std
-
-        unstable = mean_up and std_up
-        stats = {
-            "early_mean": early_mean, "late_mean": late_mean,
-            "early_std": early_std,   "late_std": late_std
-        }
-        return unstable, stats
-
-
-class PageHinkley:
-    """
-    Online Page-Hinkley drift detector (univariate).
-
-    Detects a sustained *increase* in the monitored signal.
-    To detect a decrease, call update() with -x instead of x.
-    """
-    def __init__(self, delta=0.05, lambd=0.8, min_instances=30):
-        """
-        delta: small tolerance for slight changes (insensitivity zone)
-        lambd: threshold for raising an alarm
-        min_instances: wait for this many samples before triggering
-        """
-        self.delta = float(delta)
-        self.lambd = float(lambd)
-        self.min_instances = int(min_instances)
-
-        self.reset()
-
-    def reset(self):
-        self.t = 0
-        self.mean = 0.0
-        self.cum_sum = 0.0
-        self.min_cum_sum = 0.0
-        self.ph_stat = 0.0
-        self.drift = False
-
-    def update(self, x):
-        """
-        Feed one new observation x.
-        Returns True if drift detected at this step, else False.
-        """
-        self.t += 1
-
-        # Incremental mean
-        self.mean += (x - self.mean) / self.t
-
-        # Cumulative sum of deviations (for increase detection)
-        self.cum_sum += (x - self.mean - self.delta)
-
-        # Track minimum of cumulative sum
-        self.min_cum_sum = min(self.min_cum_sum, self.cum_sum)
-
-        # Page-Hinkley statistic
-        self.ph_stat = self.cum_sum - self.min_cum_sum
-
-        # Drift decision
-        if self.t > self.min_instances and self.ph_stat > self.lambd:
-            self.drift = True
-            # You can either reset here or leave it accumulating
-            self.reset()
-            return True
-
-        return False
-
-
 def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
@@ -249,54 +156,61 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         end_offset = start_offset + train_batchsize
         X_batch = x_batch[start_offset: end_offset]
         Y_batch = y_batch[start_offset: end_offset]
+
         if args.optimizer == 'strsaga':
-            # --- STRSAGA local step ---
-          counts = np.bincount(Y_batch.astype(np.int32), minlength=gv.NUM_CLASSES)
-          w = counts.sum() / np.maximum(counts, 1)
-          w = np.clip(w, 0.5, 3.0).astype(np.float32)
-          w = w / w.mean()
+    # --- STRSAGA local step ---
+            counts = np.bincount(Y_batch.astype(np.int32), minlength=gv.NUM_CLASSES)
+            w = counts.sum() / np.maximum(counts, 1)
+            w = np.clip(w, 0.5, 3.0).astype(np.float32)
+            w = w / w.mean()
 
-          feed = {x: X_batch, y: Y_batch, class_w_ph: w}
+            feed = {x: X_batch, y: Y_batch, class_w_ph: w}
 
-            # 1) raw gradients for this batch
-          grad_vals = sess.run(grad_tensors, feed_dict=feed)  # list of np arrays
+    # 1) raw gradients for this batch
+            grad_vals = sess.run(grad_tensors, feed_dict=feed)  # list of np arrays
 
-            # 2) STRSAGA variance-reduction
-          if grad_sum is None:
+    # 2) STRSAGA variance-reduction
+            if grad_sum is None:
                 grad_sum = [np.zeros_like(g) for g in grad_vals]
-       
-          j = slot_idx
-          old_g = grad_mem[j]
 
-          if mem_count == 0 or old_g is None:
-                # memory empty -> plain SGD
-             vr_grad = [g.copy() for g in grad_vals]
-             for k, g in enumerate(grad_vals):
-                    grad_sum[k] += g
-                    grad_mem[j] = [g.copy() for g in grad_vals]
-                    mem_count += 1
-             else:
-                # SAGA-style correction: g_t - phi_j + phi_bar
-                phi_bar = [grad_sum[k] / float(mem_count) for k in range(len(grad_vals))]
-                vr_grad = [g - old_g[k] + phi_bar[k] for k, g in enumerate(grad_vals)]
-                for k, g in enumerate(grad_vals):
-                    grad_sum[k] += g - old_g[k]
+            j = slot_idx
+            old_g = grad_mem[j]
+
+            if mem_count == 0 or old_g is None:
+        # memory empty -> plain SGD
+                vr_grad = [g.copy() for g in grad_vals]
+
+        # update running sum and memory for this slot
+            for k, g in enumerate(grad_vals):
+                grad_sum[k] += g
                 grad_mem[j] = [g.copy() for g in grad_vals]
-                slot_idx = (slot_idx + 1) % mem_size
 
-               # 3) apply update: w <- w - lr_stable * vr_grad
-                w_vals = sess.run(trainable_vars)
-                new_w_vals = [w_ - lr_stable * g_ for w_, g_ in zip(w_vals, vr_grad)]
+            if mem_count < mem_size:
+                mem_count += 1
 
-                assign_feed = {ph: nw for ph, nw in zip(new_w_ph_list, new_w_vals)}
-                sess.run(assign_ops, feed_dict=assign_feed)
+        else:
+        # SAGA-style correction: g_t - phi_j + phi_bar
+        phi_bar = [grad_sum[k] / float(mem_count) for k in range(len(grad_vals))]
+        vr_grad = [g - old_g[k] + phi_bar[k] for k, g in enumerate(grad_vals)]
 
-                # 4) Compute loss / per-label loss / F1 / preds for monitoring
-                fetch_metrics = [weighted_loss]
-                loss_val, _ = sess.run(
-                    fetch_metrics,
-                    feed_dict=feed
-                    )
+        # update running sum and memory
+        for k, g in enumerate(grad_vals):
+            grad_sum[k] += g - old_g[k]
+        grad_mem[j] = [g.copy() for g in grad_vals]
+
+    # move to next memory slot (circular)
+    slot_idx = (slot_idx + 1) % mem_size
+
+    # 3) apply update: w <- w - lr * vr_grad
+    w_vals = sess.run(trainable_vars)
+    new_w_vals = [w_ - lr * g_ for w_, g_ in zip(w_vals, vr_grad)]
+
+    assign_feed = {ph: nw for ph, nw in zip(new_w_ph_list, new_w_vals)}
+    sess.run(assign_ops, feed_dict=assign_feed)
+
+    # 4) Compute loss for monitoring
+    loss_val = sess.run(weighted_loss, feed_dict=feed)
+
  
         start_offset = end_offset
 

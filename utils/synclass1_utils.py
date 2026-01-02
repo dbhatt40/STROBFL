@@ -9,6 +9,7 @@ import numpy as np
 from tensorflow.keras import layers, Model
 import global_vars as gv
 import time
+from collections import deque
 
 class DriftStream4Class:
     """
@@ -592,3 +593,90 @@ def aggregate_with_rbf_and_aging(
         new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
 
     return new_global_weights
+
+
+class PageHinkley:
+    """
+    Online Page-Hinkley drift detector (univariate).
+
+    Detects a sustained *increase* in the monitored signal.
+    To detect a decrease, call update() with -x instead of x.
+    """
+    def __init__(self, delta=0.05, lambd=0.8, min_instances=30):
+        """
+        delta: small tolerance for slight changes (insensitivity zone)
+        lambd: threshold for raising an alarm
+        min_instances: wait for this many samples before triggering
+        """
+        self.delta = float(delta)
+        self.lambd = float(lambd)
+        self.min_instances = int(min_instances)
+
+        self.reset()
+
+    def reset(self):
+        self.t = 0
+        self.mean = 0.0
+        self.cum_sum = 0.0
+        self.min_cum_sum = 0.0
+        self.ph_stat = 0.0
+        self.drift = False
+
+    def update(self, x):
+        """
+        Feed one new observation x.
+        Returns True if drift detected at this step, else False.
+        """
+        self.t += 1
+
+        # Incremental mean
+        self.mean += (x - self.mean) / self.t
+
+        # Cumulative sum of deviations (for increase detection)
+        self.cum_sum += (x - self.mean - self.delta)
+
+        # Track minimum of cumulative sum
+        self.min_cum_sum = min(self.min_cum_sum, self.cum_sum)
+
+        # Page-Hinkley statistic
+        self.ph_stat = self.cum_sum - self.min_cum_sum
+
+        # Drift decision
+        if self.t > self.min_instances and self.ph_stat > self.lambd:
+            self.drift = True
+            # You can either reset here or leave it accumulating
+            self.reset()
+            return True
+
+        return False
+
+
+class LossStabilityTest:
+    def __init__(self, window=10, min_increase=0.4, std_mult=3.0):
+        self.window = int(window)
+        self.min_increase = float(min_increase)
+        self.std_mult = float(std_mult)
+        self.buf = deque(maxlen=self.window)
+
+    def update(self, loss_val):
+        self.buf.append(float(loss_val))
+        if len(self.buf) < self.window:
+            return False, {}
+
+        arr = np.array(self.buf, dtype=np.float32)
+        half = self.window // 2
+        early = arr[:half]
+        late  = arr[half:]
+
+        early_mean, late_mean = float(early.mean()), float(late.mean())
+        early_std,  late_std  = float(early.std() + 1e-8), float(late.std() + 1e-8)
+
+        mean_up = (late_mean - early_mean) / max(early_mean, 1e-8) > self.min_increase
+        std_up  = late_std > self.std_mult * early_std
+
+        unstable = mean_up and std_up
+        stats = {
+            "early_mean": early_mean, "late_mean": late_mean,
+            "early_std": early_std,   "late_std": late_std
+        }
+        return unstable, stats

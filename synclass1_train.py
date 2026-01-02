@@ -52,7 +52,6 @@ def synclass1_train_fn(return_dict, results_dict):
     dmode = gv.dmode
     arate = gv.arate
     ifactor = gv.ifactor
-  
     
     gen = federated_mixed_drift_stream_with_queues(
     num_rounds=T,
@@ -69,12 +68,8 @@ def synclass1_train_fn(return_dict, results_dict):
     )
     
 
-	
-
     for round_idx, client_batches, test_batch in gen:
         print("Round:", round_idx)
-
-
 
         X_test, y_test, t_test = test_batch
         # print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
@@ -92,6 +87,8 @@ def synclass1_train_fn(return_dict, results_dict):
 		
         agents_left = 1e4
         activeclient = 0
+    # after this many steps without drift -> go back to stable
+        lr=None
         while activeclient < num_agents_per_time:
             true_simul = min(simul_num, agents_left)
             print('Training %s agents' % true_simul)
@@ -104,6 +101,7 @@ def synclass1_train_fn(return_dict, results_dict):
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
 
                 p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+
                 p.start()
                 process_list.append(p)
                 activeclient += 1	
@@ -161,9 +159,5 @@ def synclass1_train_fn(return_dict, results_dict):
         eval_loss_list.append(return_dict['eval_loss'])
  	
         file_write_resultsdata(results_dict)
-
-
-
-
 
     return round_idx
