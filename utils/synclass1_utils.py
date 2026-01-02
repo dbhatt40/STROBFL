@@ -602,7 +602,7 @@ class PageHinkley:
     Detects a sustained *increase* in the monitored signal.
     To detect a decrease, call update() with -x instead of x.
     """
-    def __init__(self, delta=0.05, lambd=0.8, min_instances=30):
+    def __init__(self, delta=0.1, lambd=2.0, min_instances=30):
         """
         delta: small tolerance for slight changes (insensitivity zone)
         lambd: threshold for raising an alarm

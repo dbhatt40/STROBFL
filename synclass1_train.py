@@ -24,6 +24,7 @@ import global_vars as gv
 from utils.eval_utils import eval_func
 from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging
 from synclass1_agents import synclass1_agent
+from synclass1_agents_adam import synclass1_agent_adam
 
 
 def synclass1_train_fn(return_dict, results_dict):
@@ -87,6 +88,7 @@ def synclass1_train_fn(return_dict, results_dict):
 		
         agents_left = 1e4
         activeclient = 0
+
     # after this many steps without drift -> go back to stable
         lr=None
         while activeclient < num_agents_per_time:
@@ -99,8 +101,10 @@ def synclass1_train_fn(return_dict, results_dict):
                 print('Client training %s agent' % i)
                 X_batch, y_batch, t_batch= client_batches[i]     
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
-
-                p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                if('adam' in gv.optimizer):
+                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                elif('strobfl_learn' in gv.optimizer):
+                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
 
                 p.start()
                 process_list.append(p)
@@ -124,18 +128,6 @@ def synclass1_train_fn(return_dict, results_dict):
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
                     dtype=np.float64,
                   )
-
-# =============================================================================
-#               global_weights= aggregate_with_rbf(
-#                  global_weights,
-#                  num_agents_per_time,
-#                  return_dict,
-#                  curr_agents,
-#                  client_num_samples,
-#                  gamma=1.0,
-#                  eps=1e-12)
-#  	
-# =============================================================================
               global_weights= aggregate_with_rbf_and_aging(
                  global_weights,
                  num_agents_per_time,

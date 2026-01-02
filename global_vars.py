@@ -77,7 +77,7 @@ def init():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default='uci-sensor',
                         help="dataset to be used")
-    parser.add_argument("--optimizer", default='sgd',
+    parser.add_argument("--optimizer", default='adam',
                         help="optimizer to be used")
     parser.add_argument("--k", type=int, default=4, help="number of agents")
     parser.add_argument("--C", type=float, default=0.5,
