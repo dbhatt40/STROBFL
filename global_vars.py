@@ -161,7 +161,7 @@ def init():
     NUM_DRIFTED = None
     BATCH_SIZE = args.B
     
-    global T,C, k, gar
+    global T,C, k, gar, optimizer
     global ndrift, dmode, arate, ifactor, B
     T = None
     C = None
@@ -176,10 +176,12 @@ def init():
     dmode = 'Shared'
     arate = 1.0
     ifactor = 0.3
+    optimizer = 'adam'
     ndrift = args.ndrift
     dmode = args.dmode
     arate = args.arate
     ifactor = args.ifactor
+    optimizer = args.optimizer
     B = args.B
 
     global max_acc

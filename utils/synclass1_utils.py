@@ -119,7 +119,7 @@ class DriftStream4Class:
         idx_next = (idx + 1) % 4
 
         local_pos = (cycle_pos - idx * quarter) / quarter  # in [0,1)
-        transition_width = 0.4  # fraction of quarter used for transition
+        transition_width = 0.05  # fraction of quarter used for transition
 
         if local_pos < (1.0 - transition_width):
             mix = 0.0
@@ -263,7 +263,7 @@ def federated_mixed_drift_stream_with_queues(
     drift_clients_mode="independent",  # "independent" or "shared"
     arrival_rate=1.0,
     test_batch_size=256,
-    noise_std=0.2,
+    noise_std=0.05,
     imbalance_factor=0.0,
     samples_per_cycle=10000,
     random_state=None,
@@ -338,24 +338,29 @@ def federated_mixed_drift_stream_with_queues(
 #-----------------------------
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-            shared_stream = DriftStream4Class(
-                noise_std=noise_std,
-                imbalance_factor=imbalance_factor,
-                samples_per_cycle=samples_per_cycle,
-                random_state=rng.integers(1_000_000),
-            )
-            for cid in drifted_client_ids:
-                client_streams[cid] = shared_stream  # all share same drift
+              shared_phase_offset = 15000  # or choose one common offset
+              shared_seed = int(rng.integers(1_000_000))
+              for cid in drifted_client_ids:
+                    client_streams[cid] = DriftStream4Class(
+                        noise_std=noise_std,
+                        imbalance_factor=imbalance_factor,
+                        samples_per_cycle=samples_per_cycle,
+                        random_state=shared_seed + cid,   # different randomness per client
+                        initial_step=shared_phase_offset  # same drift schedule
+                  )
         elif drift_clients_mode == "independent":
+            phase_offsets = [15000,40000,65000,90000]
+            counter=0
             for cid in drifted_client_ids:
-                phase_offset = int(rng.integers(0, samples_per_cycle))
+                # phase_offset = int(rng.integers(0, samples_per_cycle))
                 client_streams[cid] = DriftStream4Class(
                     noise_std=noise_std,
                     imbalance_factor=imbalance_factor,
                     samples_per_cycle=samples_per_cycle,
                     random_state=rng.integers(1_000_000) + cid,
-                    initial_step=phase_offset
-                )
+                    initial_step=phase_offsets[counter]
+                    )
+                counter = counter + 1
         else:
             raise ValueError("drift_clients_mode must be 'independent' or 'shared'")
 #-------------------------
@@ -602,7 +607,7 @@ class PageHinkley:
     Detects a sustained *increase* in the monitored signal.
     To detect a decrease, call update() with -x instead of x.
     """
-    def __init__(self, delta=0.1, lambd=2.0, min_instances=30):
+    def __init__(self, agent, delta=0.1, lambd=2.0, min_instances=30, signal_type="loss"):
         """
         delta: small tolerance for slight changes (insensitivity zone)
         lambd: threshold for raising an alarm
@@ -611,6 +616,8 @@ class PageHinkley:
         self.delta = float(delta)
         self.lambd = float(lambd)
         self.min_instances = int(min_instances)
+        self.signal_type=signal_type
+        self.agent = agent
 
         self.reset()
 
@@ -644,8 +651,9 @@ class PageHinkley:
         # Drift decision
         if self.t > self.min_instances and self.ph_stat > self.lambd:
             self.drift = True
+            print("PH stat for signal agent, t, val, signal:",self.agent, self.t, self.ph_stat, self.signal_type)
             # You can either reset here or leave it accumulating
-            self.reset()
+         #   self.reset()
             return True
 
         return False
