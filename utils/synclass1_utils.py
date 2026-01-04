@@ -11,6 +11,9 @@ import global_vars as gv
 import time
 from collections import deque
 
+
+
+
 class DriftStream4Class:
     """
     4-class synthetic data generator with:
@@ -50,10 +53,11 @@ class DriftStream4Class:
         You can tweak these if you want stronger/weaker drift.
         """
         # Means
+        drift_scale_mu_a = 3.0
         drift_scale_mu_b = 2.0
         drift_scale_mu_c = 2.5
         drift_scale_mu_d = 3.0
-        mu_A = np.array([0.0, 0.0])
+        mu_A = np.array([0.0, 0.0])*drift_scale_mu_a
         mu_B = np.array([2.0, 0.0])*drift_scale_mu_b
         mu_C = np.array([0.0, 2.0])*drift_scale_mu_c
         mu_D = np.array([-2.0, -1.0])*drift_scale_mu_d
@@ -67,7 +71,9 @@ class DriftStream4Class:
                           [0.0, 1.2]])
         cov_D = np.array([[1.0, 0.5],
                           [0.5, 1.5]])
-        W_scale_B = 2.0
+        
+        W_scale_A = 1.8
+        W_scale_B = 1.8
         W_scale_C = 1.7
         W_scale_D = 2.3
         # Linear classifiers (W,b) for each regime
@@ -103,6 +109,7 @@ class DriftStream4Class:
         ])
         b_D = np.array([0.3, -0.4, 0.2, 0.0])
         
+        W_A = W_scale_A * W_A
         W_B = W_scale_B * W_B
         W_C = W_scale_C * W_C
         W_D = W_scale_D * W_D
@@ -738,3 +745,58 @@ class LossStabilityTest:
             "early_std": early_std,   "late_std": late_std
         }
         return unstable, stats
+    
+def _update_from_minibatch(cm_acc, loss_sum_acc, cnt_acc, y_true_int, y_pred_int, per_ex_loss, num_classes):
+    """
+    Update aggregated confusion + per-label loss sums/counts from one minibatch.
+    y_true_int: shape [B], int in [0, C-1]
+    y_pred_int: shape [B], int in [0, C-1]
+    per_ex_loss: shape [B], float
+    """
+    global cm_acc, loss_sum_acc, cnt_acc
+
+    # Confusion matrix for this minibatch
+    cm_step = np.zeros((num_classes, num_classes), dtype=np.float64)
+    # fast bincount trick for confusion:
+    idx = y_true_int.astype(np.int64) * num_classes + y_pred_int.astype(np.int64)
+    bc = np.bincount(idx, minlength=num_classes * num_classes).astype(np.float64)
+    cm_step = bc.reshape(num_classes, num_classes)
+    cm_acc += cm_step
+
+    # Per-label loss sums/counts (by TRUE label)
+    # counts per label
+    cnt_step = np.bincount(y_true_int, minlength=num_classes).astype(np.float64)
+    cnt_acc += cnt_step
+
+    # sum loss per label
+    # np.add.at is safe for repeated indices
+    np.add.at(loss_sum_acc, y_true_int, per_ex_loss.astype(np.float64))
+
+
+def _compute_metrics_from_acc(cm_acc, loss_sum_acc, cnt_acc, eps):
+    """
+    Compute per-label loss and per-label F1 from accumulated stats.
+    Returns: (cnt, per_label_loss, f1_per_label, f1_macro)
+    """
+    tp = np.diag(cm_acc)
+    pred_pos = cm_acc.sum(axis=0)
+    act_pos = cm_acc.sum(axis=1)
+    fp = pred_pos - tp
+    fn = act_pos - tp
+
+    precision = tp / (tp + fp + eps)
+    recall = tp / (tp + fn + eps)
+    f1_per_label = (2.0 * precision * recall) / (precision + recall + eps)
+
+    per_label_loss = np.where(cnt_acc > 0.0, loss_sum_acc / (cnt_acc + eps), np.nan)
+    f1_macro = np.nanmean(f1_per_label)
+
+    return act_pos, per_label_loss, f1_per_label, f1_macro
+
+
+def _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc):
+    global cm_acc, loss_sum_acc, cnt_acc, agg_k
+    cm_acc.fill(0.0)
+    loss_sum_acc.fill(0.0)
+    cnt_acc.fill(0.0)
+    agg_k = 0
