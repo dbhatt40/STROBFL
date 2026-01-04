@@ -165,26 +165,27 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     loss_before = float(loss_before)
     
     # print('loaded shared weights')
-    cooldown_steps = 10 
+    cooldown_steps = 5 
     loss_history_per_label = [[] for _ in range(num_classes)]
     f1_history_per_label  =[[] for _ in range(num_classes)]
     loss_ph_per_label = [
-      PageHinkley(current_agent,delta=0.3, lambd=3.0, min_instances=30,signal_type="loss")
+      PageHinkley(current_agent,delta=0.01, lambd=0.7, min_instances=30,signal_type="loss")
       for _ in range(num_classes)
       ]
     f1_ph_per_label = [
-      PageHinkley(current_agent, delta=0.01, lambd=1.5, min_instances=5, signal_type="f1-score")
+      PageHinkley(current_agent, delta=0.01, lambd=0.7, min_instances=5, signal_type="f1-score")
       for _ in range(num_classes)
       ]
     
-    stab = LossStabilityTest(window=10, min_increase=0.20, std_mult=2.0)
+    stab = LossStabilityTest(window=10, min_increase=0.5, std_mult=1.0)
     
+    f1_c = float(f1m_before) 
     for c in range(num_classes):
             loss_c = float(pll_before[c]) 
             if np.isfinite(loss_c):
                 loss_history_per_label[c].append(loss_c)
                 loss_ph_per_label[c].update(loss_c) 
-            f1_c = float(f1l_before[c])              # <-- level
+                        # <-- level
             if np.isfinite(f1_c):
                 err_f1 = 1.0 - f1_c                # higher = worse
                 f1_history_per_label[c].append(err_f1)
@@ -236,61 +237,64 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
                   }
               )
 #------------------------------------------------------------------------------------------
-        
-        pll_val = pll_before - pll_after
-        f1l_val = f1l_before - f1l_after
-        loss_val = loss_before - loss_after
+        if(step%2==0):
+          pll_val = pll_before - pll_after
+          f1l_val = f1l_before - f1l_after
+          loss_val = loss_before - loss_after
           
-        pll_val = np.nan_to_num(pll_val, nan=0.0)
-        f1l_val = np.nan_to_num(f1l_val, nan=0.0)
+          pll_val = np.nan_to_num(pll_val, nan=0.0)
+          f1l_val = np.nan_to_num(f1l_val, nan=0.0)
 
-        any_drift  = False
-        loss_drift = False
-        f1_drift   = False
+          any_drift  = False
+          loss_drift = False
+          f1_drift   = False
 
-        unstable, stats = stab.update(loss_after)   
+          unstable, stats = stab.update(loss_after)   
 
-        for c in range(num_classes):
+          f1_c = float(f1m_after)  
+          for c in range(num_classes):
     # ----- loss signal: LEVEL -----
-            loss_c = float(pll_after[c])           
-            if np.isfinite(loss_c):
-                loss_history_per_label[c].append(loss_c)
-                ld = loss_ph_per_label[c].update(loss_c)   # PH will self-gate via min_instances
-                loss_drift |= ld
-                any_drift  |= ld
+              loss_c = float(pll_after[c])           
+              if np.isfinite(loss_c):
+                  loss_history_per_label[c].append(loss_c)
+                  ld = loss_ph_per_label[c].update(loss_c)   # PH will self-gate via min_instances
+                  loss_drift |= ld
+                  any_drift  |= ld
 
     # ----- F1 signal: ERROR LEVEL -----
-            f1_c = float(f1l_after[c])              # <-- level
-            if np.isfinite(f1_c):
-                err_f1 = 1.0 - f1_c                # higher = worse
-                f1_history_per_label[c].append(err_f1)
-                fd = f1_ph_per_label[c].update(err_f1)
-                f1_drift |= fd
-                any_drift |= fd
+                          # <-- level
+              if np.isfinite(f1_c):
+                  err_f1 = 1.0 - f1_c                # higher = worse
+                  f1_history_per_label[c].append(err_f1)
+                  fd = f1_ph_per_label[c].update(err_f1)
+                  f1_drift |= fd
+                  any_drift |= fd
 
-
-        if unstable or any_drift:
-            steps_since_drift = 0
         
-        if unstable or loss_drift or f1_drift:
-            if(current_agent<4):
-                print("Drift detected in drifted client:",current_agent)
-            else:
-                print("Drift detected in non-drifted client:",current_agent)
-            sess.run(alpha_var.assign(alpha_lfdrift))
-            sess.run(lr_var.assign(lr_lfdrift))
-            if loss_drift and  "cd" not in agent_drift:
-                agent_drift.append("cd")
-            if f1_drift and  "f1" not in agent_drift:
-                agent_drift.append("f1")
-            if unstable and  "u" not in agent_drift:
-                 agent_drift.append("u")
-        else:
-            steps_since_drift += 1
-            if steps_since_drift >= cooldown_steps:
-                sess.run(alpha_var.assign(alpha_stable))
-                sess.run(lr_var.assign(lr_stable))
+          if unstable or loss_drift or f1_drift:
 
+              steps_since_drift = 0
+              if(current_agent<4):
+                  print("Drift detected in drifted client:",current_agent)
+              else:
+                  print("Drift detected in non-drifted client:",current_agent)
+              if unstable:
+                  sess.run(reset_ema_op)
+             
+              sess.run(alpha_var.assign(alpha_lfdrift))
+              sess.run(lr_var.assign(lr_lfdrift))
+              if loss_drift and  "cd" not in agent_drift:
+                  agent_drift.append("cd")
+              if f1_drift and  "f1" not in agent_drift:
+                  agent_drift.append("f1")
+              if unstable and  "u" not in agent_drift:
+                   agent_drift.append("u")
+          else:
+              steps_since_drift += 1
+              if steps_since_drift >= cooldown_steps:
+                  sess.run(alpha_var.assign(alpha_stable))
+                  sess.run(lr_var.assign(lr_stable))
+  
 
         start_offset = end_offset
 

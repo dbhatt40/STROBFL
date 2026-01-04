@@ -50,10 +50,13 @@ class DriftStream4Class:
         You can tweak these if you want stronger/weaker drift.
         """
         # Means
+        drift_scale_mu_b = 2.0
+        drift_scale_mu_c = 2.5
+        drift_scale_mu_d = 3.0
         mu_A = np.array([0.0, 0.0])
-        mu_B = np.array([2.0, 0.0])
-        mu_C = np.array([0.0, 2.0])
-        mu_D = np.array([-2.0, -1.0])
+        mu_B = np.array([2.0, 0.0])*drift_scale_mu_b
+        mu_C = np.array([0.0, 2.0])*drift_scale_mu_c
+        mu_D = np.array([-2.0, -1.0])*drift_scale_mu_d
 
         # Covariances
         cov_A = np.array([[1.0, 0.2],
@@ -64,7 +67,9 @@ class DriftStream4Class:
                           [0.0, 1.2]])
         cov_D = np.array([[1.0, 0.5],
                           [0.5, 1.5]])
-
+        W_scale_B = 2.0
+        W_scale_C = 1.7
+        W_scale_D = 2.3
         # Linear classifiers (W,b) for each regime
         W_A = np.array([
             [1.0,  0.6],   # class 0
@@ -97,6 +102,10 @@ class DriftStream4Class:
             [0.3,  1.2],
         ])
         b_D = np.array([0.3, -0.4, 0.2, 0.0])
+        
+        W_B = W_scale_B * W_B
+        W_C = W_scale_C * W_C
+        W_D = W_scale_D * W_D
 
         mu_list  = [mu_A,  mu_B,  mu_C,  mu_D]
         cov_list = [cov_A, cov_B, cov_C, cov_D]
@@ -119,7 +128,7 @@ class DriftStream4Class:
         idx_next = (idx + 1) % 4
 
         local_pos = (cycle_pos - idx * quarter) / quarter  # in [0,1)
-        transition_width = 0.05  # fraction of quarter used for transition
+        transition_width = 0.20  # fraction of quarter used for transition
 
         if local_pos < (1.0 - transition_width):
             mix = 0.0

@@ -81,8 +81,11 @@ def synclass1_agent_adam(current_agent, x_batch, y_batch, round_idx, gpu_id, ret
     per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits)
     loss = tf.reduce_mean(per_example_loss)
     optimizer = tf.train.AdamOptimizer(learning_rate=lr_var)
-    global_step = tf.compat.v1.train.get_or_create_global_step()
+    global_step = tf.compat.v1.Variable(0, trainable=False, dtype=tf.int64, name="global_step")
     train_op = optimizer.minimize(loss, global_step=global_step)
+    
+    init_op = tf.compat.v1.global_variables_initializer()
+    sess.run(init_op)
     start_offset = 0
 
     print("Num training steps: {}".format(num_steps))
