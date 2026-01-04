@@ -61,7 +61,7 @@ def synclass1_train_fn(return_dict, results_dict):
     num_drifted_clients=ndrift,
     drift_clients_mode=dmode,  # or "shared"
     arrival_rate=arate,
-    test_batch_size=256,
+    test_batch_size=500,
     noise_std=0.05,
     imbalance_factor=ifactor,
     samples_per_cycle=100000,

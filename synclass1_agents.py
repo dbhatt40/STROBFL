@@ -165,7 +165,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     loss_before = float(loss_before)
     
     # print('loaded shared weights')
-    cooldown_steps = 5 
+    cooldown_steps = 10
     loss_history_per_label = [[] for _ in range(num_classes)]
     f1_history_per_label  =[[] for _ in range(num_classes)]
     loss_ph_per_label = [
@@ -177,7 +177,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
       for _ in range(num_classes)
       ]
     
-    stab = LossStabilityTest(window=10, min_increase=0.5, std_mult=1.0)
+    stab = LossStabilityTest(window=10, min_increase=1.0, std_mult=2.0)
     
     f1_c = float(f1m_before) 
     for c in range(num_classes):

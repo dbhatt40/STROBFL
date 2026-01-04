@@ -198,6 +198,25 @@ class DriftStream4Class:
             t[i] = ti
 
         return X, y, t
+    
+  
+
+    def sample_test_batch(self, batch_size, train_batchsize):
+        """
+        Draw a batch of samples: X shape (batch_size, 2), y shape (batch_size,), t shape (batch_size,)
+        """
+        X = np.zeros((batch_size, 2), dtype=np.float32)
+        y = np.zeros(batch_size, dtype=np.int64)
+        t = np.zeros(batch_size, dtype=np.float32)
+
+        for i in range(batch_size):
+            xi, yi, ti = self.sample_one()
+            X[i] = xi
+            y[i] = yi
+            t[i] = ti
+        synchronize_steps = train_batchsize - batch_size
+        self.global_step += synchronize_steps
+        return X, y, t
 
 
 class StationaryStream4Class:
@@ -262,6 +281,23 @@ class StationaryStream4Class:
             t[i] = ti
 
         return X, y, t
+    
+    def sample_test_batch(self, batch_size, train_batchsize):
+        """
+        Draw a batch of samples: X shape (batch_size, 2), y shape (batch_size,), t shape (batch_size,)
+        """
+        X = np.zeros((batch_size, 2), dtype=np.float32)
+        y = np.zeros(batch_size, dtype=np.int64)
+        t = np.zeros(batch_size, dtype=np.float32)
+
+        for i in range(batch_size):
+            xi, yi, ti = self.sample_one()
+            X[i] = xi
+            y[i] = yi
+            t[i] = ti
+        synchronize_steps = train_batchsize - batch_size
+        self.global_step += synchronize_steps
+        return X, y, t
 
 
 def federated_mixed_drift_stream_with_queues(
@@ -271,7 +307,7 @@ def federated_mixed_drift_stream_with_queues(
     num_drifted_clients,
     drift_clients_mode="independent",  # "independent" or "shared"
     arrival_rate=1.0,
-    test_batch_size=256,
+    test_batch_size=500,
     noise_std=0.05,
     imbalance_factor=0.0,
     samples_per_cycle=10000,
@@ -347,7 +383,7 @@ def federated_mixed_drift_stream_with_queues(
 #-----------------------------
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-              shared_phase_offset = 15000  # or choose one common offset
+              shared_phase_offset = 40000  # or choose one common offset
               shared_seed = int(rng.integers(1_000_000))
               for cid in drifted_client_ids:
                     client_streams[cid] = DriftStream4Class(
@@ -380,10 +416,35 @@ def federated_mixed_drift_stream_with_queues(
             imbalance_factor=imbalance_factor,
             random_state=rng.integers(1_000_000) + 10_000 + cid,
         )
-#-------------------------
+#-------------------------test streams-------------------
         
     test_streams = [None] * num_clients
     # --- Create analogous test streams so test has same drift/stationary structure as clients ---
+    if num_drifted_clients > 0:
+        if drift_clients_mode == "shared":
+              shared_phase_offset = 40000  # or choose one common offset
+              shared_seed = rng.integers(1_000_000) + 999_000,
+              for cid in drifted_client_ids:
+                    test_streams[cid] = DriftStream4Class(
+                        noise_std=noise_std,
+                        imbalance_factor=imbalance_factor,
+                        samples_per_cycle=samples_per_cycle,
+                        random_state=shared_seed + cid,   # different randomness per client
+                        initial_step=shared_phase_offset  # same drift schedule
+                  )
+        elif drift_clients_mode == "independent":
+            phase_offsets = [15000,40000,65000,90000]
+            counter=0
+            for cid in drifted_client_ids:
+                # phase_offset = int(rng.integers(0, samples_per_cycle))
+                test_streams[cid]= DriftStream4Class(
+                    noise_std=noise_std,
+                    imbalance_factor=imbalance_factor,
+                    samples_per_cycle=samples_per_cycle,
+                    random_state=rng.integers(1_000_000) + 1_000_000 + cid,
+                    initial_step=phase_offsets[counter]
+                    )
+                counter = counter + 1
 
 # Drifted test "clients"
     for cid in stationary_client_ids:
@@ -392,28 +453,8 @@ def federated_mixed_drift_stream_with_queues(
             imbalance_factor=0,
             random_state=rng.integers(1_000_000) + 2_000_000 + cid,
             ) 
-    if num_drifted_clients > 0:
-        if drift_clients_mode == "shared":
-        # one shared drifting test stream
-            shared_test_stream = DriftStream4Class(
-                noise_std=noise_std,
-                imbalance_factor=0,
-                samples_per_cycle=samples_per_cycle,
-                random_state=rng.integers(1_000_000) + 999_000,
-                )
-            for cid in drifted_client_ids:
-                test_streams[cid] = shared_test_stream
-        elif drift_clients_mode == "independent":
-            for cid in drifted_client_ids:
-               phase_offset = int(rng.integers(0, samples_per_cycle))
-               test_streams[cid] = DriftStream4Class(
-                            noise_std=noise_std,
-                            imbalance_factor=0,
-                            samples_per_cycle=samples_per_cycle,
-                            random_state=rng.integers(1_000_000) + 1_000_000 + cid,
-                            initial_step=phase_offset,
-                            )
-#-------------------------
+  
+ #-------------------------
 
     for r in range(num_rounds):
         client_batches = []
@@ -469,7 +510,7 @@ def federated_mixed_drift_stream_with_queues(
                 if n_c <= 0:
                    continue
 
-                X_c_test, y_c_test, t_c_test = stream.sample_batch(n_c)
+                X_c_test, y_c_test, t_c_test = stream.sample_test_batch(n_c, batch_size)
                 X_test_list.append(X_c_test)
                 y_test_list.append(y_c_test)
                 t_test_list.append(t_c_test)
