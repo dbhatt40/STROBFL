@@ -146,7 +146,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     loss_sum_acc = np.zeros(num_classes, dtype=np.float64)            # sum of per-example loss per true label
     cnt_acc = np.zeros(num_classes, dtype=np.float64)   
               # count per true label
-    agg_k = 0 
+
 #-------------------------------------------------------------------------------------
     x_probe_ph = tf.placeholder(tf.float32, shape=[None, gv.DATA_DIM], name="x_probe")
     y_probe_ph = tf.placeholder(tf.int32,   shape=[None],             name="y_probe")
@@ -212,9 +212,10 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     alpha_stable = 0.8
     alpha_lfdrift = alpha_stable*0.625
     
-
+    agg_k=0
     steps_since_drift = 0  # Python-side counter
     agent_drift = []
+    _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc)
     print("Num training steps: {}".format(num_steps))
 #-----------------------------------------------------training ----------------------
     for step in range(num_steps):
@@ -237,22 +238,31 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
         pred_op = tf.argmax(logits, axis=1, output_type=tf.int32)
           
           
-        fetch_ops = [train_op, weighted_loss, per_label_loss, 
-                     f1_macro, f1_per_label, pred_op, probe_loss, y_int, per_example_loss]
-        _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc)
-        _, loss_after, pll_after, f1m_after, f1l_after, pred_after, Ls, y_true_after, per_ex_loss_after = sess.run(
+        # fetch_ops = [train_op, weighted_loss, per_label_loss, 
+        #              f1_macro, f1_per_label, pred_op, probe_loss, y_int, per_example_loss]
+        # _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc)
+        # _, loss_after, pll_after, f1m_after, f1l_after, pred_after, loss_after, y_true_after, per_ex_loss_after = sess.run(
+        #       fetch_ops,
+        #       feed_dict={
+        #           x: X_batch, y: Y_batch, class_w_ph: w,                    # training feed
+        #           x_probe_ph: X_test, y_probe_ph: Y_test, w_probe_ph: w_probe  # probe feed
+        #           }
+        #       )
+        fetch_ops = [train_op, pred_op, y_int, per_example_loss, probe_loss, weighted_loss] 
+
+        _, pred_after, y_true_after, per_ex_loss_after, Ls, loss_after  = sess.run(
               fetch_ops,
               feed_dict={
                   x: X_batch, y: Y_batch, class_w_ph: w,                    # training feed
                   x_probe_ph: X_test, y_probe_ph: Y_test, w_probe_ph: w_probe  # probe feed
-                  }
-              )
+                  })
+        
         _update_from_minibatch(cm_acc, loss_sum_acc, cnt_acc,
           y_true_after,
           pred_after,
           per_ex_loss_after, 
-          num_classes
-          )
+          num_classes)
+
         agg_k += 1
 #------------------------------------------------------------------------------------------
         if(agg_k % AGG_STEPS==0):
@@ -265,7 +275,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
           loss_drift = False
           f1_drift   = False
 
-          unstable, stats = stab.update(loss_after)   
+          unstable, stats = stab.update(Ls)   
 
           
           for c in range(num_classes):
@@ -289,17 +299,17 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
         
           if unstable or any_drift:
-              if loss_drift and  "cd" not in agent_drift:
-                 agent_drift.append("cd")
-              if f1_drift and  "f1" not in agent_drift:
-                 agent_drift.append("f1")
-              if unstable and  "u" not in agent_drift:
-                 agent_drift.append("u")
-            
+          
               if(len(agent_drift)!=0) and steps_since_drift<cooldown_steps:
                   steps_since_drift += 1
               else:
                  steps_since_drift = 0
+                 if loss_drift and  "cd" not in agent_drift:
+                    agent_drift.append("cd")
+                 if f1_drift and  "f1" not in agent_drift:
+                    agent_drift.append("f1")
+                 if unstable and  "u" not in agent_drift:
+                    agent_drift.append("u")
                  driftstr = "-".join(agent_drift)
                  if(current_agent<4):
                     print(f"Drift {driftstr} detected in drifted client: {current_agent}")
@@ -317,7 +327,9 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
               if steps_since_drift >= cooldown_steps:
                   sess.run(alpha_var.assign(alpha_stable))
                   sess.run(lr_var.assign(lr_stable))
-  
+                  
+          _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc)
+          agg_k = 0
 
         start_offset = end_offset
 
