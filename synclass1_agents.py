@@ -138,7 +138,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     reset_ema_op = ema_rule.make_reset_op()
     num_classes = gv.NUM_CLASSES      
 
-    AGG_STEPS = 2          # 2 steps * minibatch 10 => effective metric batch 20
+    AGG_STEPS = 4          # 2 steps * minibatch 10 => effective metric batch 20
     MIN_LABEL_CT = 2         # require >=2 true samples of a label in the aggregated window before PH update
 
     # --- Per-round accumulators for metrics (reset at start of each round) ---
@@ -178,7 +178,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     loss_history_per_label = [[] for _ in range(num_classes)]
     f1_history_per_label  =[[] for _ in range(num_classes)]
     loss_ph_per_label = [
-      PageHinkley(current_agent,delta=0.002, lambd=0.3, min_instances=10,signal_type="loss")
+      PageHinkley(current_agent,delta=0.01, lambd=0.4, min_instances=8,signal_type="loss")
       for _ in range(num_classes)
       ]
     f1_ph_per_label = [
@@ -186,7 +186,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
       for _ in range(num_classes)
       ]
     
-    stab = LossStabilityTest(window=15, min_increase=0.25, std_mult=2.5)
+    stab = LossStabilityTest(window=6, min_increase=0.25, std_mult=1.0)
 
     f1_c = float(f1m_before) 
     for c in range(num_classes):

@@ -198,6 +198,7 @@ class DriftStream4Class:
         y = np.zeros(batch_size, dtype=np.int64)
         t = np.zeros(batch_size, dtype=np.float32)
 
+        
         for i in range(batch_size):
             xi, yi, ti = self.sample_one()
             X[i] = xi
@@ -390,7 +391,7 @@ def federated_mixed_drift_stream_with_queues(
 #-----------------------------
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-              shared_phase_offset = 40000  # or choose one common offset
+              shared_phase_offset = 32000  # or choose one common offset
               shared_seed = int(rng.integers(1_000_000))
               for cid in drifted_client_ids:
                     client_streams[cid] = DriftStream4Class(
@@ -401,7 +402,7 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [15000,40000,65000,90000]
+            phase_offsets = [12000,32000,52000,72000]
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
@@ -429,7 +430,7 @@ def federated_mixed_drift_stream_with_queues(
     # --- Create analogous test streams so test has same drift/stationary structure as clients ---
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-              shared_phase_offset = 40000  # or choose one common offset
+              shared_phase_offset = 32000  # or choose one common offset
               shared_seed = rng.integers(1_000_000) + 999_000,
               for cid in drifted_client_ids:
                     test_streams[cid] = DriftStream4Class(
@@ -440,7 +441,7 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [15000,40000,65000,90000]
+            phase_offsets = [12000,32000,52000,72000]
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
@@ -746,6 +747,8 @@ class LossStabilityTest:
         }
         return unstable, stats
     
+    
+    
 def _update_from_minibatch(cm_acc, loss_sum_acc, cnt_acc, y_true_int, y_pred_int, per_ex_loss, num_classes):
     """
     Update aggregated confusion + per-label loss sums/counts from one minibatch.
@@ -753,8 +756,6 @@ def _update_from_minibatch(cm_acc, loss_sum_acc, cnt_acc, y_true_int, y_pred_int
     y_pred_int: shape [B], int in [0, C-1]
     per_ex_loss: shape [B], float
     """
-    global cm_acc, loss_sum_acc, cnt_acc
-
     # Confusion matrix for this minibatch
     cm_step = np.zeros((num_classes, num_classes), dtype=np.float64)
     # fast bincount trick for confusion:
@@ -795,8 +796,8 @@ def _compute_metrics_from_acc(cm_acc, loss_sum_acc, cnt_acc, eps):
 
 
 def _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc):
-    global cm_acc, loss_sum_acc, cnt_acc, agg_k
+
     cm_acc.fill(0.0)
     loss_sum_acc.fill(0.0)
     cnt_acc.fill(0.0)
-    agg_k = 0
+

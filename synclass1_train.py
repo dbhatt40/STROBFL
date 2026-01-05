@@ -64,7 +64,7 @@ def synclass1_train_fn(return_dict, results_dict):
     test_batch_size=500,
     noise_std=0.05,
     imbalance_factor=ifactor,
-    samples_per_cycle=100000,
+    samples_per_cycle=80000,
     random_state=42,
     )
     
