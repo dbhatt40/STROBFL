@@ -431,7 +431,7 @@ def federated_mixed_drift_stream_with_queues(
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
               shared_phase_offset = 32000  # or choose one common offset
-              shared_seed = rng.integers(1_000_000) + 999_000,
+              shared_seed = rng.integers(1_000_000) + 999_000
               for cid in drifted_client_ids:
                     test_streams[cid] = DriftStream4Class(
                         noise_std=noise_std,
