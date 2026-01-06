@@ -25,6 +25,7 @@ from utils.eval_utils import eval_func
 from utils.synclass1_utils import federated_mixed_drift_stream_with_queues, aggregate_with_rbf_and_aging
 from synclass1_agents import synclass1_agent
 from synclass1_agents_adam import synclass1_agent_adam
+from synclass1_agents_strsaga import synclass1_agent_strsaga
 
 
 def synclass1_train_fn(return_dict, results_dict):
@@ -105,6 +106,8 @@ def synclass1_train_fn(return_dict, results_dict):
                   p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('strobfl_learn' in gv.optimizer):
                   p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                elif('strsaga' in gv.optimizer):
+                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
 
                 p.start()
                 process_list.append(p)

@@ -34,7 +34,7 @@ from collections import deque
 import time
 
 
-def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent_strsaga(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
 
@@ -51,87 +51,12 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     pre_theta = None
 	
     agent_model = synclass1_model()
-    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
-    y = tf.placeholder(shape=[None],dtype=tf.int64, name="y")
-    logits = agent_model(x)
-
+  
     num_classes = gv.NUM_CLASSES
-    batch_size = len(x_batch)
 
-    num_steps = int(batch_size/train_batchsize)
-   
-# Global step (optional but useful)
-    global_step = tf.Variable(0, trainable=False, name="global_step")
-
-# Custom optimizer
-
-    lr_var = tf.Variable(1e-1, trainable=False, name="lr")
-    if args.optimizer == 'strsaga':
-        eps = 1e-8
-        class_w_ph = tf.placeholder(tf.float32, shape=[gv.NUM_CLASSES], name="class_w")
-# Per-example loss: shape [B]
-        per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=y,
-                logits=logits
-                )
-# --- Per-label sums and counts ---
-        y_int = tf.cast(y, tf.int32)
-# sum of losses per label: shape [C]
-        loss_sum_per_label = tf.math.unsorted_segment_sum(
-                data=per_example_loss,
-                segment_ids=y_int,
-                num_segments=gv.NUM_CLASSES
-                )
-# count per label: shape [C]
-        ones = tf.ones_like(per_example_loss, dtype=tf.float32)
-        count_per_label = tf.math.unsorted_segment_sum(
-            data=ones,
-            segment_ids=y_int,
-            num_segments=gv.NUM_CLASSES
-            )
-                
-              
-# per-label mean loss: shape [C]
-        per_label_loss = tf.where(
-            count_per_label > 0.0,
-            loss_sum_per_label / (count_per_label + eps),
-            tf.zeros_like(loss_sum_per_label)
-            )
-# --- If you want a scalar loss with class weights ---
-# weight each example by its label's weight
-        w_per_example = tf.gather(class_w_ph, y_int)  # shape [B]
-
-        weighted_loss = tf.reduce_sum(w_per_example * per_example_loss) / (
-            tf.reduce_sum(w_per_example) + eps
-            )
-        trainable_vars = tf.trainable_variables()
-        grad_tensors = tf.gradients(weighted_loss, trainable_vars)
-
-        # Placeholders + assign ops for manual weight updates
-        new_w_ph_list = [
-            tf.placeholder(v.dtype, shape=v.shape, name="strsaga_new_w_%d" % i)
-            for i, v in enumerate(trainable_vars)
-        ]
-        assign_ops = [
-            tf.assign(v, nw_ph)
-            for v, nw_ph in zip(trainable_vars, new_w_ph_list)
-        ]
-        
-
-        mem_size = 10
-        grad_mem = [None] * mem_size  # slots, each slot = list of gradients
-        grad_sum = None               # list of arrays (running sum)
-        mem_count = 0
-        slot_idx = 0
-
-
-        num_classes = gv.NUM_CLASSES
-
-       
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
         config.gpu_options.allow_growth = True
-        #config.gpu_options.per_process_gpu_memory_fraction = 0.05
         sess = tf.Session(config=config)
     elif args.k == 1:
         sess = tf.Session()
@@ -151,72 +76,30 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     agent_drift = []
     start_offset = 0
     print("Num training steps: {}".format(num_steps))
+    strsaga_reset = False
     for step in range(num_steps):
         start_offset = start_offset
         end_offset = start_offset + train_batchsize
         X_batch = x_batch[start_offset: end_offset]
         Y_batch = y_batch[start_offset: end_offset]
 
-        if args.optimizer == 'strsaga':
-    # --- STRSAGA local step ---
-            counts = np.bincount(Y_batch.astype(np.int32), minlength=gv.NUM_CLASSES)
-            w = counts.sum() / np.maximum(counts, 1)
-            w = np.clip(w, 0.5, 3.0).astype(np.float32)
-            w = w / w.mean()
-
-            feed = {x: X_batch, y: Y_batch, class_w_ph: w}
-
-    # 1) raw gradients for this batch
-            grad_vals = sess.run(grad_tensors, feed_dict=feed)  # list of np arrays
-
-    # 2) STRSAGA variance-reduction
-            if grad_sum is None:
-                grad_sum = [np.zeros_like(g) for g in grad_vals]
-
-            j = slot_idx
-            old_g = grad_mem[j]
-
-            if mem_count == 0 or old_g is None:
-        # memory empty -> plain SGD
-                vr_grad = [g.copy() for g in grad_vals]
-
-        # update running sum and memory for this slot
-            for k, g in enumerate(grad_vals):
-                grad_sum[k] += g
-                grad_mem[j] = [g.copy() for g in grad_vals]
-
-            if mem_count < mem_size:
-                mem_count += 1
-
-        else:
-        # SAGA-style correction: g_t - phi_j + phi_bar
-        phi_bar = [grad_sum[k] / float(mem_count) for k in range(len(grad_vals))]
-        vr_grad = [g - old_g[k] + phi_bar[k] for k, g in enumerate(grad_vals)]
-
-        # update running sum and memory
-        for k, g in enumerate(grad_vals):
-            grad_sum[k] += g - old_g[k]
-        grad_mem[j] = [g.copy() for g in grad_vals]
-
-    # move to next memory slot (circular)
-    slot_idx = (slot_idx + 1) % mem_size
-
-    # 3) apply update: w <- w - lr * vr_grad
-    w_vals = sess.run(trainable_vars)
-    new_w_vals = [w_ - lr * g_ for w_, g_ in zip(w_vals, vr_grad)]
-
-    assign_feed = {ph: nw for ph, nw in zip(new_w_ph_list, new_w_vals)}
-    sess.run(assign_ops, feed_dict=assign_feed)
-
-    # 4) Compute loss for monitoring
-    loss_val = sess.run(weighted_loss, feed_dict=feed)
-
+        loss, f1 = strsaga_client_learn_tf1(
+        sess, X_batch, Y_batch,
+        data_dim=gv.DATA_DIM,
+        num_classes=gv.NUM_CLASSES,
+        lr=1e-3,
+        memory_size=2048,
+        reset_state=strsaga_reset,    # set True at start of each round if you want
+        return_f1=True
+        )
+       print("loss:", loss, "f1:", f1)
  
         start_offset = end_offset
+        
 
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
 
-
+    
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights
