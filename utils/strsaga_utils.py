@@ -4,6 +4,12 @@ Created on Tue Jan  6 12:02:15 2026
 
 @author: Divya
 """
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan  6 12:02:15 2026
+
+@author: Divya
+"""
 import numpy as np
 import tensorflow as tf
 
@@ -12,16 +18,19 @@ tf.compat.v1.disable_eager_execution()
 
 def strsaga_client_learn_tf1(
     sess,
-    model,
+    agent_model,
     X_batch,
     Y_batch,
     *,
     data_dim,
     num_classes,
-    lr=1e-3,
+    lr=1e-1,
     memory_size=2048,
     reset_state=False,
     return_f1=True,
+    class_weights=None,          # NEW: None or np.ndarray/list shape [num_classes]
+    batch_weighted=False,        # NEW: if True and class_weights is None, compute weights from batch
+    weight_power=1.0,            # NEW: only used for batch_weighted; 1.0=inv-freq, 0.5=inv-sqrt
 ):
     """
     STRSAGA client learning (TF1 sess.run style) for synclass1_model-like MLP.
@@ -30,16 +39,25 @@ def strsaga_client_learn_tf1(
     - Each call performs ONE STRSAGA update using (X_batch, Y_batch).
     - Uses a bounded ring buffer of stored per-example gradients (size = memory_size).
 
+    Class-weighted extension:
+      - If class_weights is provided: uses those fixed weights (recommended).
+      - Else if batch_weighted=True: computes inverse-frequency weights from current batch.
+      - Else: unweighted (original behavior).
+
     Args:
       sess: tf.compat.v1.Session
+      agent_model: callable Keras model, called as agent_model(x, training=True/False)
       X_batch: np.ndarray [B, data_dim], float32/float64
       Y_batch: np.ndarray [B], int (0..num_classes-1)
-      data_dim: gv.DATA_DIM
-      num_classes: gv.NUM_CLASSES
+      data_dim: feature dimension
+      num_classes: number of classes
       lr: learning rate
       memory_size: SAGA memory size M
       reset_state: if True, zero out SAGA memory (g_mem, g_sum, ptr, count)
       return_f1: if True, returns batch macro-F1 (noisy; logging only)
+      class_weights: None or array-like [C] float; fixed weights to apply
+      batch_weighted: if True and class_weights is None, compute inv-freq weights from the batch
+      weight_power: power for inv-freq: w = 1 / freq^power; 1.0 inv-freq, 0.5 inv-sqrt
 
     Returns:
       loss_val: float
@@ -48,21 +66,26 @@ def strsaga_client_learn_tf1(
 
     # ---------- Build once & cache ----------
     if not hasattr(strsaga_client_learn_tf1, "_cache"):
-        g = tf.compat.v1.get_default_graph()
 
-        with g.as_default():
+        with tf.compat.v1.name_scope("strsaga"):
             x_ph = tf.compat.v1.placeholder(tf.float32, shape=[None, data_dim], name="x")
             y_ph = tf.compat.v1.placeholder(tf.int32,   shape=[None],          name="y")
             lr_ph = tf.compat.v1.placeholder(tf.float32, shape=[],             name="lr")
 
-            # ----- Model: synclass1_model() -----
-            inp = tf.keras.layers.Input(tensor=x_ph, name="main_input")
-            x = tf.keras.layers.Dense(32, activation="relu")(inp)
-            x = tf.keras.layers.Dense(32, activation="relu")(x)
-            logits = tf.keras.layers.Dense(num_classes)(x)  # logits
+            # fixed class weights placeholder (optional feed)
+            cw_ph = tf.compat.v1.placeholder_with_default(
+                                  tf.ones([num_classes], dtype=tf.float32),
+                                  shape=[num_classes],
+                                  name="class_weights",
+                         )
+            use_cw_ph = tf.compat.v1.placeholder_with_default(False, shape=[], name="use_class_weights")
 
-            model = tf.keras.Model(inputs=inp, outputs=logits)
-            vars_ = model.trainable_variables  # list of tf.Variable
+            # choose whether to compute batch weights
+            use_batch_w_ph = tf.compat.v1.placeholder_with_default(False, shape=[], name="use_batch_weights")
+            w_power_ph = tf.compat.v1.placeholder_with_default(1.0, shape=[], name="weight_power")
+
+            logits = agent_model(x_ph, training=True)
+            vars_ = agent_model.trainable_variables  # list of tf.Variable
 
             # ----- Helpers: pack/unpack variable vectors -----
             var_shapes = [v.shape.as_list() for v in vars_]
@@ -85,29 +108,61 @@ def strsaga_client_learn_tf1(
                     offset += sz
                 return outs
 
-            # ----- Per-example loss & per-example grads (exact) -----
-            # loss_i = sparse_softmax_xent for each example
+            eps = tf.constant(1e-8, tf.float32)
+
+            # ----- Per-example loss -----
             per_ex_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=y_ph, logits=logits
             )  # [B]
-            batch_loss = tf.reduce_mean(per_ex_loss, name="train_loss")
 
-            # Build per-example grad vectors: G is [B, P]
-            # map_fn body: takes (xi, yi) -> grad_vec_i
+            # ----- Build example weights (either fixed class weights, or batch-derived, or all-ones) -----
+            def _batch_class_weights():
+                # inverse frequency from current batch, with power
+                counts = tf.math.bincount(
+                    y_ph, minlength=num_classes, maxlength=num_classes, dtype=tf.float32
+                )  # [C]
+                freqs = counts / (tf.reduce_sum(counts) + eps)
+                inv = 1.0 / (tf.pow(freqs + eps, w_power_ph))
+                inv = inv / (tf.reduce_mean(inv) + eps)  # normalize mean ~ 1
+                return inv
+
+            # Choose class-weight vector:
+            #   if use_cw_ph: cw_ph
+            #   elif use_batch_w_ph: batch-derived
+            #   else: ones
+            ones_cw = tf.ones([num_classes], tf.float32)
+
+            cw_vec = tf.cond(
+                use_cw_ph,
+                lambda: cw_ph,
+                lambda: tf.cond(use_batch_w_ph, _batch_class_weights, lambda: ones_cw),
+            )  # [C]
+
+            ex_w = tf.gather(cw_vec, y_ph)  # [B]
+
+            # Weighted mean loss (stable scaling)
+            batch_loss = tf.reduce_sum(per_ex_loss * ex_w) / (tf.reduce_sum(ex_w) + eps)
+            batch_loss = tf.identity(batch_loss, name="train_loss")
+
+            # ----- Per-example grads (weighted): grad_i = ex_w[i] * grad(loss_i) -----
             def grad_for_one(ex):
-                xi, yi = ex  # xi: [data_dim], yi: []
+                xi, yi, wi = ex  # xi: [data_dim], yi: [], wi: []
                 xi = tf.expand_dims(xi, 0)  # [1, data_dim]
                 yi = tf.expand_dims(yi, 0)  # [1]
+
                 li = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=yi, logits=model(xi, training=True)
+                    labels=yi, logits=agent_model(xi, training=True)
                 )  # [1]
                 li = tf.reshape(li[0], [])  # scalar
+
                 gi = tf.gradients(li, vars_)  # list of grads
-                return pack(gi)  # [P]
+                gvec = pack(gi)               # [P]
+                gvec = tf.cast(wi, tf.float32) * gvec  # weight this example's gradient
+                return gvec
 
             G = tf.map_fn(
                 grad_for_one,
-                (x_ph, y_ph),
+                (x_ph, y_ph, ex_w),
                 dtype=tf.float32,
                 name="per_example_grad_vecs",
             )  # [B, P]
@@ -133,14 +188,13 @@ def strsaga_client_learn_tf1(
                 initializer=tf.zeros_initializer(), trainable=False
             )
 
-            eps = tf.constant(1e-8, tf.float32)
             cnt_f = tf.cast(tf.maximum(cnt, 1), tf.float32)
             alpha_bar = g_sum / cnt_f  # [P] (0 if cnt==0, because g_sum==0)
 
             # ----- One STRSAGA step over the batch using a while_loop -----
             def body(i, vr_acc, ptr_t, cnt_t, g_sum_t, g_mem_t):
-                g_i = G[i]  # [P]
-                old = g_mem_t[ptr_t]  # [P]
+                g_i = G[i]              # [P] (already weighted)
+                old = g_mem_t[ptr_t]    # [P]
 
                 # v_i = g_i - old + alpha_bar
                 vr_acc = vr_acc + (g_i - old + alpha_bar)
@@ -165,7 +219,8 @@ def strsaga_client_learn_tf1(
 
             i0 = tf.constant(0, tf.int32)
             vr0 = tf.zeros([P], tf.float32)
-            # We run loop in "functional" style then assign back to variables
+
+            # Functional loop then assign back to variables
             _, vr_vec, ptr_new, cnt_new, g_sum_new, g_mem_new = tf.while_loop(
                 cond, body,
                 loop_vars=[i0, vr0, ptr, cnt, g_sum, g_mem],
@@ -176,16 +231,15 @@ def strsaga_client_learn_tf1(
 
             vr_vec = vr_vec / tf.cast(tf.maximum(B, 1), tf.float32)  # [P]
 
-            # Optional clip (helps with stability; safe for training-only usage)
+            # Optional clip (helps stability)
             vr_vec, _ = tf.clip_by_global_norm([vr_vec], 5.0)
             vr_vec = vr_vec[0]
 
             # Apply parameter update: w <- w - lr * vr
-            theta = pack([v for v in vars_])  # pack current vars
-            theta_new = theta - lr_ph * vr_vec
-            new_vars = unpack(theta_new)
+           # Split vr_vec into per-variable shapes
+            vr_list = unpack(vr_vec)  # list with same shapes as vars_
 
-            assign_ops = [v.assign(nv) for v, nv in zip(vars_, new_vars)]
+            assign_ops = [v.assign_sub(lr_ph * ghat) for v, ghat in zip(vars_, vr_list)]
             state_assign = tf.group(
                 g_mem.assign(g_mem_new),
                 g_sum.assign(g_sum_new),
@@ -222,6 +276,8 @@ def strsaga_client_learn_tf1(
 
             strsaga_client_learn_tf1._cache = {
                 "x": x_ph, "y": y_ph, "lr": lr_ph,
+                "cw": cw_ph, "use_cw": use_cw_ph,
+                "use_batch_w": use_batch_w_ph, "w_power": w_power_ph,
                 "train_op": train_op,
                 "loss": batch_loss,
                 "f1": f1_macro,
@@ -229,10 +285,14 @@ def strsaga_client_learn_tf1(
                 "vars": vars_,
             }
 
-        # IMPORTANT: initialize variables created by this builder
-        sess.run(tf.compat.v1.variables_initializer(
-            tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES)
-        ))
+        # Initialize variables created by this builder (ONLY those uninitialized)
+        uninit = sess.run(tf.compat.v1.report_uninitialized_variables())
+        if len(uninit) > 0:
+            all_vars = tf.compat.v1.global_variables()
+            name_to_var = {v.name.split(":")[0]: v for v in all_vars}
+            to_init = [name_to_var[n.decode("utf-8")] for n in uninit if n.decode("utf-8") in name_to_var]
+            if to_init:
+                sess.run(tf.compat.v1.variables_initializer(to_init))
 
     # ---------- Run ----------
     h = strsaga_client_learn_tf1._cache
@@ -240,7 +300,25 @@ def strsaga_client_learn_tf1(
     if reset_state:
         sess.run(h["reset"])
 
-    feed = {h["x"]: X_batch, h["y"]: Y_batch, h["lr"]: float(lr)}
+    # ensure correct dtypes
+    Xb = X_batch.astype(np.float32, copy=False)
+    Yb = Y_batch.astype(np.int32, copy=False)
+
+    feed = {
+        h["x"]: Xb,
+        h["y"]: Yb,
+        h["lr"]: float(lr),
+    }
+
+    if class_weights is not None:
+        cw = np.asarray(class_weights, dtype=np.float32).reshape((num_classes,))
+        feed[h["cw"]] = cw
+        feed[h["use_cw"]] = True
+        feed[h["use_batch_w"]] = False
+    else:
+        feed[h["use_cw"]] = False
+        feed[h["use_batch_w"]] = bool(batch_weighted)
+        feed[h["w_power"]] = float(weight_power)
 
     if h["f1"] is not None:
         loss_val, f1_val, _ = sess.run([h["loss"], h["f1"], h["train_op"]], feed_dict=feed)
