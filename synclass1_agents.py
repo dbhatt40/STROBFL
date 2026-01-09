@@ -241,15 +241,15 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     loss_history_per_label = [[] for _ in range(NUM_CLASSES)]
     f1_history_per_label  =[[] for _ in range(NUM_CLASSES)]
     loss_ph_per_label = [
-      PageHinkley(CURRENT_AGENT,delta=0.01, lambd=1.3, min_instances=20,signal_type="loss")
+      PageHinkley(CURRENT_AGENT,delta=0.002, lambd=0.08, min_instances=10,signal_type="loss")
       for _ in range(NUM_CLASSES)
       ]
     f1_ph_per_label = [
-      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.1, min_instances=8, signal_type="f1-score")
+      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.1, min_instances=10, signal_type="f1-score")
       for _ in range(NUM_CLASSES)
       ]
     
-    stability = LossStabilityTest(window=10, min_increase=0.5, std_mult=1.5)
+    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=2.0)
 #--------------------------------------------------------------------------------------------------------
 
     start_offset = 0

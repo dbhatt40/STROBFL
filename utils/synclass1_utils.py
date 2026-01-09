@@ -523,20 +523,21 @@ def federated_mixed_drift_stream_with_queues(
             else:
                 Xc, yc, tc = stream.sample_test_batch(n_c, batch_size)  # advances by batch_size
 
-        test_batches_per_client[cid] = (Xc, yc, tc)
-
-        X_test_list.append(Xc)
-        y_test_list.append(yc)
-        t_test_list.append(tc)
+            test_batches_per_client[cid] = (Xc, yc, tc)
+            if Xc.shape[0] > 0:
+             X_test_list.append(Xc)
+             y_test_list.append(yc)
+             t_test_list.append(tc)
 
 # Global test batch = concat all per-client pieces
-        X_test = np.concatenate(X_test_list, axis=0)
-        y_test = np.concatenate(y_test_list, axis=0)
-        t_test = np.concatenate(t_test_list, axis=0)
+        X_test = np.concatenate(X_test_list, axis=0) if X_test_list else np.zeros((0,2), np.float32)
+        y_test = np.concatenate(y_test_list, axis=0) if y_test_list else np.zeros((0,), np.int64)
+        t_test = np.concatenate(t_test_list, axis=0) if t_test_list else np.zeros((0,), np.float32)
 
 # Optional shuffle (use rng for reproducibility if you want)
-        idx = np.random.permutation(len(X_test))
-        X_test, y_test, t_test = X_test[idx], y_test[idx], t_test[idx]
+        if len(X_test) > 0:
+         idx = np.random.permutation(len(X_test))
+         X_test, y_test, t_test = X_test[idx], y_test[idx], t_test[idx]
 
 # Yield BOTH
         yield r, client_batches, test_batches_per_client, (X_test, y_test, t_test)
