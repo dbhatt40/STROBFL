@@ -71,10 +71,10 @@ def synclass1_train_fn(return_dict, results_dict):
     )
     
 
-    for round_idx, client_batches, test_batch in gen:
+    for round_idx, client_batches, client_test_batches, global_test_batch in gen:
         print("Round:", round_idx)
 
-        X_test, y_test, t_test = test_batch
+        X_test, y_test, t_test = global_test_batch
         # print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
         print('-----------------Training client in server round %s----------------' % round_idx)
 
@@ -101,16 +101,17 @@ def synclass1_train_fn(return_dict, results_dict):
                 gpu_id = gv.gpu_ids[gpu_index]
                 i = curr_agents[activeclient]
                 print('Client training %s agent' % i)
-                X_batch, y_batch, t_batch= client_batches[i]     
+                X_batch, y_batch, t_batch= client_batches[i]  
+                X_tbatch, y_tbatch, t_tbatch = client_test_batches[i]
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
                 if('adam' in gv.optimizer):
-                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('strobfl_learn' in gv.optimizer):
-                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('strsaga' in gv.optimizer):
-                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('svrg' in gv.optimizer):
-                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 
                 
                 p.start()

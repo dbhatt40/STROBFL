@@ -458,7 +458,7 @@ def federated_mixed_drift_stream_with_queues(
     for cid in stationary_client_ids:
         test_streams[cid] = StationaryStream4Class(
             noise_std=noise_std,
-            imbalance_factor=0,
+            imbalance_factor=imbalance_factor,
             random_state=rng.integers(1_000_000) + 2_000_000 + cid,
             ) 
   
@@ -504,39 +504,44 @@ def federated_mixed_drift_stream_with_queues(
 #    - ratio drifted / stationary matches num_drifted_clients / num_clients
 
 # Base number of test samples per client
-        base_n = test_batch_size // num_clients
-        remainder = test_batch_size % num_clients  # distribute leftover
+# 4) Test batches: per-client + global
 
-        X_test_list = []
-        y_test_list = []
-        t_test_list = []
+        base_n = test_batch_size // num_clients
+        remainder = test_batch_size % num_clients
+
+        test_batches_per_client = [None] * num_clients
+        X_test_list, y_test_list, t_test_list = [], [], []
 
         for cid in range(num_clients):
-                stream = test_streams[cid]
-    # Give first 'remainder' clients one extra sample
-                n_c = base_n + (1 if cid < remainder else 0)
-                if n_c <= 0:
-                   continue
+            stream = test_streams[cid]
+            n_c = base_n + (1 if cid < remainder else 0)
+            if n_c <= 0:
+                # keep empty batch for consistency
+                Xc = np.zeros((0, 2), dtype=np.float32)
+                yc = np.zeros((0,), dtype=np.int64)
+                tc = np.zeros((0,), dtype=np.float32)
+            else:
+                Xc, yc, tc = stream.sample_test_batch(n_c, batch_size)  # advances by batch_size
 
-                X_c_test, y_c_test, t_c_test = stream.sample_test_batch(n_c, batch_size)
-                X_test_list.append(X_c_test)
-                y_test_list.append(y_c_test)
-                t_test_list.append(t_c_test)
+        test_batches_per_client[cid] = (Xc, yc, tc)
 
-# Concatenate into one global test batch
+        X_test_list.append(Xc)
+        y_test_list.append(yc)
+        t_test_list.append(tc)
+
+# Global test batch = concat all per-client pieces
         X_test = np.concatenate(X_test_list, axis=0)
         y_test = np.concatenate(y_test_list, axis=0)
         t_test = np.concatenate(t_test_list, axis=0)
 
-# (optional) sanity: shuffle test batch
+# Optional shuffle (use rng for reproducibility if you want)
         idx = np.random.permutation(len(X_test))
-        X_test = X_test[idx]
-        y_test = y_test[idx]
-        t_test = t_test[idx]
-                
-        yield r, client_batches, (X_test, y_test, t_test)
+        X_test, y_test, t_test = X_test[idx], y_test[idx], t_test[idx]
 
+# Yield BOTH
+        yield r, client_batches, test_batches_per_client, (X_test, y_test, t_test)
 
+    
 
 def synclass1_model():
     inp = layers.Input(shape=(gv.DATA_DIM,), name="main_input")

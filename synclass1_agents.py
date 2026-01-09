@@ -33,7 +33,7 @@ from utils.synclass1_utils import synclass1_model,PageHinkley, LossStabilityTest
 from utils.synclass1_utils import _reset_accumulators, _update_from_minibatch, _compute_metrics_from_acc
 import time
 
-LR_STABLE = 0.18 
+LR_STABLE = 0.1
 LR_CD_DRIFT = LR_STABLE*1.5
 LR_UNSTABLE = LR_STABLE*1.5
 
@@ -68,7 +68,7 @@ def compute_sample_weights(y_batch, class_weight_mode="balanced"):
 
 #--------------------------intialize-----------------------------------
 
-def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 
     args = gv.init()
@@ -215,7 +215,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_probe_ph, logits=logits_probe) * 
             tf.gather(w_probe_ph, y_probe_ph)
             )
-    counts_probe = np.bincount(Y_test.astype(np.int32), minlength=gv.NUM_CLASSES)
+    counts_probe = np.bincount(y_client_test.astype(np.int32), minlength=gv.NUM_CLASSES)
     w_probe = counts_probe.sum() / np.maximum(counts_probe, 1)
     w_probe = np.clip(w_probe, 0.5, 3.0).astype(np.float32)        
     w_probe = w_probe / w_probe.mean()
@@ -230,8 +230,8 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
        f1_probe_per_label,
        cnt_probe_per_label],
       feed_dict={
-          x_probe_ph: X_test,
-          y_probe_ph: Y_test,
+          x_probe_ph: x_client_test,
+          y_probe_ph: y_client_test,
           w_probe_ph: w_probe
          }
        )
@@ -283,11 +283,11 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 # 2) compute probe AFTER update
         pred_probe_after, per_ex_loss_probe_after = sess.run(
          [pred_probe, per_ex_loss_probe],
-         feed_dict={x_probe_ph: X_test, y_probe_ph: Y_test, w_probe_ph: w_probe}
+         feed_dict={x_probe_ph: x_client_test, y_probe_ph: y_client_test, w_probe_ph: w_probe}
          )
         
         _update_from_minibatch(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc,
-                        Y_test,
+                        y_client_test,
                         pred_probe_after,
                         per_ex_loss_probe_after,
                         NUM_CLASSES)
@@ -295,21 +295,21 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
         if(agg_k % AGG_STEPS==0):
             
-          if ((DRIFT_FLAG==False) or (DRIFT_FLAG==True and agsteps_since_drift >= COOLDOWN_STEPS)):
+           if ((DRIFT_FLAG==False) or (DRIFT_FLAG==True and agsteps_since_drift >= COOLDOWN_STEPS)):
               
-             DRIFT_FLAG = detect_drift(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc, eps, NUM_CLASSES, loss_history_per_label, loss_ph_per_label, 
-                                       f1_history_per_label, f1_ph_per_label, stability, agent_drift, agsteps_since_drift,
-                                       reset_ema_op, sess, lr_var, alpha_var, CURRENT_AGENT)
-             if(DRIFT_FLAG==True):
-                 agsteps_since_drift = 0
-          else:
-            agsteps_since_drift += 1
-            if(agsteps_since_drift==COOLDOWN_STEPS):
-                sess.run(lr_var.assign(LR_STABLE))              
-                sess.run(alpha_var.assign(ALPHA_STABLE))
+              DRIFT_FLAG = detect_drift(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc, eps, NUM_CLASSES, loss_history_per_label, loss_ph_per_label, 
+                                        f1_history_per_label, f1_ph_per_label, stability, agent_drift, agsteps_since_drift,
+                                        reset_ema_op, sess, lr_var, alpha_var, CURRENT_AGENT)
+              if(DRIFT_FLAG==True):
+                  agsteps_since_drift = 0
+           else:
+             agsteps_since_drift += 1
+             if(agsteps_since_drift==COOLDOWN_STEPS):
+                 sess.run(lr_var.assign(LR_STABLE))              
+                 sess.run(alpha_var.assign(ALPHA_STABLE))
     
-          _reset_accumulators(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc)
-          agg_k = 0
+           _reset_accumulators(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc)
+           agg_k = 0
          
         start_offset = end_offset
 
@@ -378,6 +378,7 @@ def detect_drift(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc,eps, num_classe
               loss_c = float(pll_val[c])  
 
               if np.isfinite(loss_c) and cnt_probe_acc[c]  >= MIN_LABEL_CT:
+                 
 
                   loss_history_per_label[c].append(loss_c)
                   ld = loss_ph_per_label[c].update(loss_c)   # PH will self-gate via min_instances
