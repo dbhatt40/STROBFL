@@ -30,7 +30,7 @@ import math
 
 from customSGD import CustomRuleSGD, gradient_update_rule_factory
 from utils.synclass1_utils import synclass1_model,PageHinkley, LossStabilityTest
-from utils.synclass1_utils import _reset_accumulators, _update_from_minibatch, _compute_metrics_from_acc
+from utils.synclass1_utils import build_2step_accumulators
 import time
 
 LR_STABLE = 0.1
@@ -44,7 +44,7 @@ ALPHA_UNSTABLE = ALPHA_STABLE*0.25
 
 COOLDOWN_STEPS = 2
 NUM_CLASSES = 4
-AGG_STEPS = 3          # 2 steps * minibatch 10 => effective metric batch 20
+AGG_STEPS = 2          # 2 steps * minibatch 10 => effective metric batch 20
 MIN_LABEL_CT = 5        # require >=2 true samples of a label in the aggregated window before PH update
 
 
@@ -65,203 +65,8 @@ def compute_sample_weights(y_batch, class_weight_mode="balanced"):
 
     return np.array([class_to_w[y] for y in y_batch], dtype=np.float32)
 
-
-#--------------------------intialize-----------------------------------
-
-def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
-    tf.keras.backend.set_learning_phase(1)
-
-    args = gv.init()
-    if args.k > 1:
-        config = tf.ConfigProto(gpu_options=gv.gpu_options)
-        config.gpu_options.allow_growth = True
-        sess = tf.Session(config=config)
-    elif args.k == 1:
-        sess = tf.Session()
-    else:
-        return
-    
-    tf.compat.v1.keras.backend.set_session(sess)
-    CURRENT_AGENT = current_agent
-    train_batchsize = gv.B
-    
-    if lr is None:
-        lr = args.eta
-    print('Agent %s on GPU %s' % (CURRENT_AGENT,gpu_id))
-    
-    # set environment
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-    pre_theta = None
-    
-    agent_model = synclass1_model()
-   	
-    if pre_theta is not None:
-        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
-    else:
-        theta = shared_weights
-    agent_model.set_weights(theta)
-    
-    NUM_CLASSES = gv.NUM_CLASSES
-    batch_size = len(x_batch)
-    num_steps = math.ceil(batch_size/train_batchsize)   
-    
-  #  ----------------------------------------------------------------------------
-    
-    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
-    y = tf.placeholder(shape=[None],dtype=tf.int32, name="y")
-    logits = agent_model(x, training=True)
-    global_step = tf.Variable(0, trainable=False, name="global_step")
-
-    lr_var = tf.Variable(LR_STABLE, trainable=False, name="lr")
-    alpha_var = tf.Variable(ALPHA_STABLE, trainable=False,
-                        dtype=tf.float32, name="ema_alpha")
-    eps = 1e-8
-    sample_w = tf.compat.v1.placeholder(tf.float32, shape=[None], name="sample_w")  # [B]
-    w_per_example = sample_w  # [B]
-
-    per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=y,
-                logits=logits
-                )
-    y_int = tf.cast(y, tf.int32)
-
-    weighted_loss = tf.reduce_sum(w_per_example * per_example_loss) / (
-                    tf.reduce_sum(w_per_example) + eps
-                    )
-    ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
-     
-    optimizer = CustomRuleSGD(learning_rate=lr_var, update_rule=ema_rule)
-    train_op = optimizer.minimize(weighted_loss, global_step=global_step)
-    
-    reset_ema_op = ema_rule.make_reset_op()
-
-#------------------------------------definitions of PH and Stab classes----------------------------
-    # print('loaded shared weights')
-    loss_history_per_label = [[] for _ in range(NUM_CLASSES)]
-    f1_history_per_label  =[[] for _ in range(NUM_CLASSES)]
-    loss_ph_per_label = [
-      PageHinkley(CURRENT_AGENT,delta=0.02, lambd=5.5, min_instances=15,signal_type="loss")
-      for _ in range(NUM_CLASSES)
-      ]
-    f1_ph_per_label = [
-      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.001, min_instances=5, signal_type="f1-score")
-      for _ in range(NUM_CLASSES)
-      ]
-    
-    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=1.5)
-#--------------------------------------------------------------------------------------------------------
-    logits_post = agent_model(x, training=False)
-    per_ex_loss_post = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_int, logits=logits_post)
-
-    update_accum_op, read_agg, reset_accum_op = build_2step_accumulators(
-      logits=logits_post,
-      y_int=y_int,
-      num_classes=NUM_CLASSES,
-      per_example_loss=per_ex_loss_post,
-      scope="train_accum2"
-     )
-      
-    sess.run(tf.compat.v1.global_variables_initializer())
-    sess.run(reset_accum_op)
-
-    
-#----------------------------------------------------------------------------------------------------
- 
-    print("Num training steps: {}".format(num_steps))
-    start_offset = 0
-    agg_k=0
-    agsteps_since_drift = 0  # Python-side counter
-    agent_drift = []
-    DRIFT_FLAG = False
-#-----------------------------------------------------training ----------------------
-    sess.run(tf.compat.v1.global_variables_initializer())
-    sess.run(reset_accum_op)
-
-    for step in range(num_steps):
-      if start_offset >= batch_size:
-         break
-      end_offset = min(start_offset + train_batchsize, batch_size)
-
-      X_batch = x_batch[start_offset:end_offset]
-      Y_batch = y_batch[start_offset:end_offset]
-
-      wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
-
-    # Step 1: training update (pre-update loss not needed unless you want it)
-      sess.run(train_op, feed_dict={x: X_batch, y: Y_batch, sample_w: wb})
-
-    # Step 2: post-update stats accumulation
-      sess.run(update_accum_op, feed_dict={x: X_batch, y: Y_batch})
-
-    # Move to next batch  ✅
-      start_offset = end_offset
-
-      agg_k += 1
-      if agg_k % AGG_STEPS == 0:
-          agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
-          sess.run(reset_accum_op)
-          if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
-                  DRIFT_FLAG = detect_drift(agg, eps, NUM_CLASSES, stability, agent_drift, agsteps_since_drift,
-                                        reset_ema_op, sess, lr_var, alpha_var, CURRENT_AGENT)
-                  if(DRIFT_FLAG==True):
-                    agsteps_since_drift = 0
-
-          elif (DRIFT_FLAG==True) and (agsteps_since_drift<COOLDOWN_STEPS):
-                  agsteps_since_drift += 1
-                  if(agsteps_since_drift==COOLDOWN_STEPS):
-                      sess.run(lr_var.assign(LR_STABLE))              
-                      sess.run(alpha_var.assign(ALPHA_STABLE))
-                      DRIFT_FLAG = False
-            
-        # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
-
-
-
-    local_weights = agent_model.get_weights()
-    # print("Local weights shape:", local_weights[0].shape, local_weights[0])
-    local_delta = local_weights - shared_weights
-
-    # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
-    # print("Y test in agents:", Y_test.shape
-  
-    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
-    
-    seed=None
-    delayedclient = "false"
-    max_delay_s = 0.1 # max .1 sec delay
-    rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
-    if rng.random() < 0.3:    # delay only some clients
-      delay = rng.exponential(scale=0.05)   # mean 0.05s
-      delay = min(delay, max_delay_s)      # cap it
-      time.sleep(float(delay))	
-      delayedclient="true"
-    
-    client_str = "client_" + str(CURRENT_AGENT) + "_t_" + str(round_idx)
-    driftstr = "-".join(agent_drift)
-    delayedstr = delayedclient
-    results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
-    # print("Results dict:", results_dict[client_str])
-    # print("Number of results_dict items - client:", len(results_dict))
- 	
- 	
-    print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))#  
-    return_dict[str(CURRENT_AGENT)] = np.array(local_delta)
-    return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
-    return_dict[str(CURRENT_AGENT) + "_num_samples"] = batch_size
-    return_dict[str(CURRENT_AGENT) + "_time"] = time.time()
-
-    np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (CURRENT_AGENT, round_idx), local_delta)
-
-
-    return
-
-
-
 def detect_drift(
     agg,
-    *,
     eps,
     num_classes,
     min_label_ct,
@@ -276,11 +81,6 @@ def detect_drift(
     lr_var,
     alpha_var,
     CURRENT_AGENT,
-    # adaptation constants
-    LR_UNSTABLE,
-    LR_CD_DRIFT,
-    ALPHA_CD_DRIFT,
-    ALPHA_CS_DRIFT,
 ):
     """
     Uses aggregated stats in `agg` (over your AGG_STEPS window) to detect drift.
@@ -357,3 +157,197 @@ def detect_drift(
     return drift_flag
 
               
+#--------------------------intialize-----------------------------------
+
+def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+    tf.keras.backend.set_learning_phase(1)
+
+    args = gv.init()
+    if args.k > 1:
+        config = tf.ConfigProto(gpu_options=gv.gpu_options)
+        config.gpu_options.allow_growth = True
+        sess = tf.Session(config=config)
+    elif args.k == 1:
+        sess = tf.Session()
+    else:
+        return
+    
+    tf.compat.v1.keras.backend.set_session(sess)
+    CURRENT_AGENT = current_agent
+    train_batchsize = gv.B
+    
+    if lr is None:
+        lr = args.eta
+    print('Agent %s on GPU %s' % (CURRENT_AGENT,gpu_id))
+    
+    # set environment
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
+    pre_theta = None
+    
+    agent_model = synclass1_model()
+   	
+    if pre_theta is not None:
+        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
+    else:
+        theta = shared_weights
+    agent_model.set_weights(theta)
+    
+    NUM_CLASSES = gv.NUM_CLASSES
+    batch_size = len(x_batch)
+    num_steps = math.ceil(batch_size/train_batchsize)   
+    
+  #  ----------------------------------------------------------------------------
+    
+    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
+    y = tf.placeholder(shape=[None],dtype=tf.int32, name="y")
+    logits = agent_model(x, training=True)
+    global_step = tf.Variable(0, trainable=False, name="global_step")
+
+    lr_var = tf.Variable(LR_STABLE, trainable=False, name="lr")
+    alpha_var = tf.Variable(ALPHA_STABLE, trainable=False,
+                        dtype=tf.float32, name="ema_alpha")
+    eps = 1e-8
+    sample_w = tf.compat.v1.placeholder(tf.float32, shape=[None], name="sample_w")  # [B]
+    w_per_example = sample_w  # [B]
+
+    per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=y,
+                logits=logits
+                )
+    y_int = tf.cast(y, tf.int32)
+
+    weighted_loss = tf.reduce_sum(w_per_example * per_example_loss) / (
+                    tf.reduce_sum(w_per_example) + eps
+                    )
+    ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
+     
+    optimizer = CustomRuleSGD(learning_rate=lr_var, update_rule=ema_rule)
+    train_op = optimizer.minimize(weighted_loss, global_step=global_step)
+    
+    reset_ema_op = ema_rule.make_reset_op()
+
+#------------------------------------definitions of PH and Stab classes----------------------------
+    # print('loaded shared weights')
+    loss_history_per_label = [[] for _ in range(NUM_CLASSES)]
+    f1_history_per_label  =[[] for _ in range(NUM_CLASSES)]
+    loss_ph_per_label = [
+      PageHinkley(CURRENT_AGENT,delta=0.02, lambd=0.1, min_instances=15,signal_type="loss")
+      for _ in range(NUM_CLASSES)
+      ]
+    f1_ph_per_label = [
+      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.01, min_instances=10, signal_type="f1-score")
+      for _ in range(NUM_CLASSES)
+      ]
+    
+    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=3.5)
+#--------------------------------------------------------------------------------------------------------
+    logits_post = agent_model(x, training=False)
+    per_ex_loss_post = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_int, logits=logits_post)
+
+    update_accum_op, read_agg, reset_accum_op = build_2step_accumulators(
+      logits=logits_post,
+      y_int=y_int,
+      num_classes=NUM_CLASSES,
+      per_example_loss=per_ex_loss_post,
+      scope="train_accum2"
+     )
+      
+    sess.run(tf.compat.v1.global_variables_initializer())
+    sess.run(reset_accum_op)
+
+    
+#----------------------------------------------------------------------------------------------------
+ 
+    print("Num training steps: {}".format(num_steps))
+    start_offset = 0
+    agg_k=0
+    agsteps_since_drift = 0  # Python-side counter
+    agent_drift = []
+    DRIFT_FLAG = False
+#-----------------------------------------------------training ----------------------
+    sess.run(tf.compat.v1.global_variables_initializer())
+    sess.run(reset_accum_op)
+
+    for step in range(num_steps):
+      if start_offset >= batch_size:
+         break
+      end_offset = min(start_offset + train_batchsize, batch_size)
+
+      X_batch = x_batch[start_offset:end_offset]
+      Y_batch = y_batch[start_offset:end_offset]
+
+      wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
+
+    # Step 1: training update (pre-update loss not needed unless you want it)
+      sess.run(train_op, feed_dict={x: X_batch, y: Y_batch, sample_w: wb})
+
+    # Step 2: post-update stats accumulation
+      sess.run(update_accum_op, feed_dict={x: X_batch, y: Y_batch})
+
+    # Move to next batch  ✅
+      start_offset = end_offset
+
+      agg_k += 1
+      if agg_k % AGG_STEPS == 0:
+          agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
+          sess.run(reset_accum_op)
+          if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
+                 
+                  DRIFT_FLAG = detect_drift(agg, eps, NUM_CLASSES, MIN_LABEL_CT,stability, loss_ph_per_label,f1_ph_per_label,
+                                       loss_history_per_label,f1_history_per_label,agent_drift, reset_ema_op,sess, lr_var, alpha_var, CURRENT_AGENT)
+                  if(DRIFT_FLAG==True):
+                    agsteps_since_drift = 0
+
+          elif (DRIFT_FLAG==True) and (agsteps_since_drift<COOLDOWN_STEPS):
+                  agsteps_since_drift += 1
+                  if(agsteps_since_drift==COOLDOWN_STEPS):
+                      sess.run(lr_var.assign(LR_STABLE))              
+                      sess.run(alpha_var.assign(ALPHA_STABLE))
+                      DRIFT_FLAG = False
+            
+        # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
+
+
+
+    local_weights = agent_model.get_weights()
+    # print("Local weights shape:", local_weights[0].shape, local_weights[0])
+    local_delta = local_weights - shared_weights
+
+    # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
+    # print("Y test in agents:", Y_test.shape
+  
+    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
+    
+    seed=None
+    delayedclient = "false"
+    max_delay_s = 0.1 # max .1 sec delay
+    rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
+    if rng.random() < 0.3:    # delay only some clients
+      delay = rng.exponential(scale=0.05)   # mean 0.05s
+      delay = min(delay, max_delay_s)      # cap it
+      time.sleep(float(delay))	
+      delayedclient="true"
+    
+    client_str = "client_" + str(CURRENT_AGENT) + "_t_" + str(round_idx)
+    driftstr = "-".join(agent_drift)
+    delayedstr = delayedclient
+    results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
+    # print("Results dict:", results_dict[client_str])
+    # print("Number of results_dict items - client:", len(results_dict))
+ 	
+ 	
+    print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))#  
+    return_dict[str(CURRENT_AGENT)] = np.array(local_delta)
+    return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
+    return_dict[str(CURRENT_AGENT) + "_num_samples"] = batch_size
+    return_dict[str(CURRENT_AGENT) + "_time"] = time.time()
+
+    np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (CURRENT_AGENT, round_idx), local_delta)
+
+
+    return
+
+
+
