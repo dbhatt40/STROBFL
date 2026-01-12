@@ -11,6 +11,8 @@ import global_vars as gv
 import time
 from collections import deque
 
+import tensorflow as tf
+
 
 
 
@@ -755,55 +757,107 @@ class LossStabilityTest:
     
     
     
-def _update_from_minibatch(cm_acc, loss_sum_acc, cnt_acc, y_true_int, y_pred_int, per_ex_loss, num_classes):
+
+
+def build_2step_accumulators(logits, y_int, num_classes, per_example_loss, scope="accum2", eps=1e-9):
     """
-    Update aggregated confusion + per-label loss sums/counts from one minibatch.
-    y_true_int: shape [B], int in [0, C-1]
-    y_pred_int: shape [B], int in [0, C-1]
-    per_ex_loss: shape [B], float
+    Accumulates stats every training step.
+    You can read aggregated metrics whenever you want (e.g., every 2 steps),
+    then reset accumulators.
+
+    logits: [B, C]
+    y_int:  [B] int32/int64
+    per_example_loss: [B] (weighted or unweighted)
     """
-    # Confusion matrix for this minibatch
-    cm_step = np.zeros((num_classes, num_classes), dtype=np.float64)
-    # fast bincount trick for confusion:
-    idx = y_true_int.astype(np.int64) * num_classes + y_pred_int.astype(np.int64)
-    bc = np.bincount(idx, minlength=num_classes * num_classes).astype(np.float64)
-    cm_step = bc.reshape(num_classes, num_classes)
-    cm_acc += cm_step
+    y_int = tf.cast(y_int, tf.int32)
+    pred = tf.argmax(logits, axis=1, output_type=tf.int32)  # [B]
 
-    # Per-label loss sums/counts (by TRUE label)
-    # counts per label
-    cnt_step = np.bincount(y_true_int, minlength=num_classes).astype(np.float64)
-    cnt_acc += cnt_step
+    with tf.compat.v1.variable_scope(scope, reuse=tf.compat.v1.AUTO_REUSE):
+        # How many *steps* have been accumulated in the current window
+        step_ct = tf.Variable(0, trainable=False, dtype=tf.int32, name="step_ct")
 
-    # sum loss per label
-    # np.add.at is safe for repeated indices
-    np.add.at(loss_sum_acc, y_true_int, per_ex_loss.astype(np.float64))
+        # Accumulate total loss sum and example count (for overall mean loss)
+        loss_sum = tf.Variable(0.0, trainable=False, dtype=tf.float32, name="loss_sum")
+        ex_ct    = tf.Variable(0.0, trainable=False, dtype=tf.float32, name="ex_ct")
 
+        # Per-label loss sum and per-label example count
+        loss_sum_by_label = tf.Variable(tf.zeros([num_classes], tf.float32),
+                                        trainable=False, name="loss_sum_by_label")
+        ex_ct_by_label    = tf.Variable(tf.zeros([num_classes], tf.float32),
+                                        trainable=False, name="ex_ct_by_label")
 
-def _compute_metrics_from_acc(cm_acc, loss_sum_acc, cnt_acc, eps):
-    """
-    Compute per-label loss and per-label F1 from accumulated stats.
-    Returns: (cnt, per_label_loss, f1_per_label, f1_macro)
-    """
-    tp = np.diag(cm_acc)
-    pred_pos = cm_acc.sum(axis=0)
-    act_pos = cm_acc.sum(axis=1)
-    fp = pred_pos - tp
-    fn = act_pos - tp
+        # TP/FP/FN per label (for aggregated F1)
+        tp_acc = tf.Variable(tf.zeros([num_classes], tf.float32), trainable=False, name="tp")
+        fp_acc = tf.Variable(tf.zeros([num_classes], tf.float32), trainable=False, name="fp")
+        fn_acc = tf.Variable(tf.zeros([num_classes], tf.float32), trainable=False, name="fn")
 
-    precision = tp / (tp + fp + eps)
-    recall = tp / (tp + fn + eps)
-    f1_per_label = (2.0 * precision * recall) / (precision + recall + eps)
+    # --- step contributions ---
+    # Overall loss contribution
+    step_loss_sum = tf.reduce_sum(per_example_loss)                 # scalar
+    step_ex_ct    = tf.cast(tf.shape(per_example_loss)[0], tf.float32)
 
-    per_label_loss = np.where(cnt_acc > 0.0, loss_sum_acc / (cnt_acc + eps), np.nan)
-    f1_macro = np.nanmean(f1_per_label)
+    # Per-label loss contributions
+    step_loss_sum_by_label = tf.math.unsorted_segment_sum(
+        per_example_loss, y_int, num_segments=num_classes
+    )  # [C]
+    step_ex_ct_by_label = tf.math.unsorted_segment_sum(
+        tf.ones_like(per_example_loss, dtype=tf.float32), y_int, num_segments=num_classes
+    )  # [C]
 
-    return act_pos, per_label_loss, f1_per_label, f1_macro
+    # Per-label TP/FP/FN contributions
+    y_oh = tf.one_hot(y_int, depth=num_classes, dtype=tf.float32)   # [B,C]
+    p_oh = tf.one_hot(pred,  depth=num_classes, dtype=tf.float32)   # [B,C]
 
+    step_tp = tf.reduce_sum(y_oh * p_oh, axis=0)                    # [C]
+    step_fp = tf.reduce_sum((1.0 - y_oh) * p_oh, axis=0)            # [C]
+    step_fn = tf.reduce_sum(y_oh * (1.0 - p_oh), axis=0)            # [C]
 
-def _reset_accumulators(cm_acc, loss_sum_acc, cnt_acc):
+    # --- update accumulators each training step ---
+    update_accum_op = tf.group(
+        tf.compat.v1.assign_add(step_ct, 1),
+        tf.compat.v1.assign_add(loss_sum, step_loss_sum),
+        tf.compat.v1.assign_add(ex_ct, step_ex_ct),
+        tf.compat.v1.assign_add(loss_sum_by_label, step_loss_sum_by_label),
+        tf.compat.v1.assign_add(ex_ct_by_label, step_ex_ct_by_label),
+        tf.compat.v1.assign_add(tp_acc, step_tp),
+        tf.compat.v1.assign_add(fp_acc, step_fp),
+        tf.compat.v1.assign_add(fn_acc, step_fn),
+        name="update_accum_op"
+    )
 
-    cm_acc.fill(0.0)
-    loss_sum_acc.fill(0.0)
-    cnt_acc.fill(0.0)
+    # --- aggregated metrics from accumulators ---
+    mean_loss = tf.math.divide_no_nan(loss_sum, ex_ct)  # scalar
+
+    mean_loss_by_label = tf.math.divide_no_nan(loss_sum_by_label, ex_ct_by_label)  # [C]
+
+    precision = tp_acc / (tp_acc + fp_acc + eps)  # [C]
+    recall    = tp_acc / (tp_acc + fn_acc + eps)  # [C]
+    f1_by_label = (2.0 * precision * recall) / (precision + recall + eps)         # [C]
+    f1_macro = tf.reduce_mean(f1_by_label)                                         # scalar
+
+    label_counts = tf.cast(ex_ct_by_label, tf.int32)  # [C]
+
+    read_agg = {
+        "step_ct": step_ct,
+        "loss": mean_loss,
+        "loss_per_label": mean_loss_by_label,
+        "f1_per_label": f1_by_label,
+        "f1_macro": f1_macro,
+        "label_counts": label_counts,
+    }
+
+    # --- reset accumulators (after you read every 2 steps) ---
+    reset_accum_op = tf.group(
+        tf.compat.v1.assign(step_ct, 0),
+        tf.compat.v1.assign(loss_sum, 0.0),
+        tf.compat.v1.assign(ex_ct, 0.0),
+        tf.compat.v1.assign(loss_sum_by_label, tf.zeros([num_classes], tf.float32)),
+        tf.compat.v1.assign(ex_ct_by_label, tf.zeros([num_classes], tf.float32)),
+        tf.compat.v1.assign(tp_acc, tf.zeros([num_classes], tf.float32)),
+        tf.compat.v1.assign(fp_acc, tf.zeros([num_classes], tf.float32)),
+        tf.compat.v1.assign(fn_acc, tf.zeros([num_classes], tf.float32)),
+        name="reset_accum_op"
+    )
+
+    return update_accum_op, read_agg, reset_accum_op
 

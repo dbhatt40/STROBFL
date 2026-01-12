@@ -80,19 +80,22 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
         sess = tf.Session()
     else:
         return
+    
     tf.compat.v1.keras.backend.set_session(sess)
     CURRENT_AGENT = current_agent
     train_batchsize = gv.B
+    
     if lr is None:
         lr = args.eta
     print('Agent %s on GPU %s' % (CURRENT_AGENT,gpu_id))
+    
     # set environment
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
     pre_theta = None
+    
     agent_model = synclass1_model()
-#--------------------------------------------------------------------
    	
     if pre_theta is not None:
         theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
@@ -100,220 +103,120 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
         theta = shared_weights
     agent_model.set_weights(theta)
     
-    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
-    y = tf.placeholder(shape=[None],dtype=tf.int64, name="y")
-    logits = agent_model(x)
-
     NUM_CLASSES = gv.NUM_CLASSES
     batch_size = len(x_batch)
     num_steps = math.ceil(batch_size/train_batchsize)   
-# Global step (optional but useful)
+    
+  #  ----------------------------------------------------------------------------
+    
+    x = tf.placeholder(shape=[None, gv.DATA_DIM], dtype=tf.float32, name="x")
+    y = tf.placeholder(shape=[None],dtype=tf.int32, name="y")
+    logits = agent_model(x, training=True)
     global_step = tf.Variable(0, trainable=False, name="global_step")
-# Custom optimizer
-    lr_var = tf.Variable(1e-1, trainable=False, name="lr")
-    eps = 1e-8
-    # class_w_ph = tf.placeholder(tf.float32, shape=[gv.NUM_CLASSES], name="class_w")
-    sample_w = tf.compat.v1.placeholder(tf.float32, shape=[None], name="sample_w")
 
-# Per-example loss: shape [B]
+    lr_var = tf.Variable(LR_STABLE, trainable=False, name="lr")
+    alpha_var = tf.Variable(ALPHA_STABLE, trainable=False,
+                        dtype=tf.float32, name="ema_alpha")
+    eps = 1e-8
+    sample_w = tf.compat.v1.placeholder(tf.float32, shape=[None], name="sample_w")  # [B]
+    w_per_example = sample_w  # [B]
+
     per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=y,
                 logits=logits
                 )
-    # model_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-    #     labels=y,
-    #     logits=logits,
-    # )
-# --- Per-label sums and counts ---
     y_int = tf.cast(y, tf.int32)
-# sum of losses per label: shape [C]
-# =============================================================================
 
-# --- If you want a scalar loss with class weights ---
-# weight each example by its label's weight
-    w_per_example = tf.gather(sample_w, y_int)  # shape [B]
-# =============================================================================
     weighted_loss = tf.reduce_sum(w_per_example * per_example_loss) / (
-            tf.reduce_sum(w_per_example) + eps
-            )
-
-
-    alpha_var = tf.Variable(ALPHA_STABLE, trainable=False,
-                        dtype=tf.float32, name="ema_alpha")
-        # EMA-based update rule using alpha_var
+                    tf.reduce_sum(w_per_example) + eps
+                    )
     ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
      
     optimizer = CustomRuleSGD(learning_rate=lr_var, update_rule=ema_rule)
     train_op = optimizer.minimize(weighted_loss, global_step=global_step)
     
     reset_ema_op = ema_rule.make_reset_op()
-    NUM_CLASSES = gv.NUM_CLASSES      
-
-
-
-    # --- Per-round accumulators for metrics (reset at start of each round) ---
-    cm_probe_acc = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.float64)   # aggregated confusion matrix
-    loss_probe_sum_acc = np.zeros(NUM_CLASSES, dtype=np.float64)            # sum of per-example loss per true label
-    cnt_probe_acc = np.zeros(NUM_CLASSES, dtype=np.float64)   
-              # count per true label
-
-#-------------------------------------------------------------------------------------
-    x_probe_ph = tf.placeholder(tf.float32, shape=[None, gv.DATA_DIM], name="x_probe")
-    y_probe_ph = tf.placeholder(tf.int32,   shape=[None],             name="y_probe")
-    w_probe_ph = tf.placeholder(tf.float32, shape=[gv.NUM_CLASSES],   name="w_probe")
-    logits_probe = agent_model(x_probe_ph) 
-
-    pred_probe = tf.argmax(logits_probe, axis=1, output_type=tf.int32)
-    per_ex_loss_probe = tf.nn.sparse_softmax_cross_entropy_with_logits(
-    labels=y_probe_ph,
-    logits=logits_probe
-    )
-    y_probe_int = tf.cast(y_probe_ph, tf.int32)
-    eps = 1e-8
-
-    loss_sum_probe_per_label = tf.math.unsorted_segment_sum(
-      per_ex_loss_probe,
-      y_probe_int,
-      gv.NUM_CLASSES
-    )
-
-    cnt_probe_per_label = tf.math.unsorted_segment_sum(
-      tf.ones_like(per_ex_loss_probe, tf.float32),
-      y_probe_int,
-      gv.NUM_CLASSES
-    )
-
-    per_label_probe_loss = tf.math.divide_no_nan(
-      loss_sum_probe_per_label,
-      cnt_probe_per_label + eps
-    )
-
-# Confusion matrix on probe
-    cm_probe = tf.math.confusion_matrix(
-        y_probe_ph, pred_probe, num_classes=NUM_CLASSES, dtype=tf.float32
-    )
-
-    tp_p = tf.linalg.diag_part(cm_probe)
-    pred_pos_p = tf.reduce_sum(cm_probe, axis=0)   # predicted positives
-    act_pos_p  = tf.reduce_sum(cm_probe, axis=1)   # actual positives
-
-    fp_p = pred_pos_p - tp_p
-    fn_p = act_pos_p - tp_p
-
-    precision_p = tf.math.divide_no_nan(tp_p, tp_p + fp_p)
-    recall_p    = tf.math.divide_no_nan(tp_p, tp_p + fn_p)
-
-    f1_probe_per_label = tf.math.divide_no_nan(
-        2.0 * precision_p * recall_p, precision_p + recall_p
-    )
-    f1_probe_macro = tf.reduce_mean(f1_probe_per_label)
-
-# Reuse the same model to compute logits on probe inputs
-      # however you build logits; must reuse weights
-
-    probe_loss = tf.reduce_mean(
-    tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_probe_ph, logits=logits_probe) * 
-            tf.gather(w_probe_ph, y_probe_ph)
-            )
-    counts_probe = np.bincount(y_client_test.astype(np.int32), minlength=gv.NUM_CLASSES)
-    w_probe = counts_probe.sum() / np.maximum(counts_probe, 1)
-    w_probe = np.clip(w_probe, 0.5, 3.0).astype(np.float32)        
-    w_probe = w_probe / w_probe.mean()
-    
-#-------------------------run with initial probe-on global model----------------------------------------------
-    
-    sess.run(tf.global_variables_initializer())
-    probe_loss_before, pll_p_before, f1m_p_before, f1l_p_before, cnt_p_before = sess.run(
-      [probe_loss,
-       per_label_probe_loss,
-       f1_probe_macro,
-       f1_probe_per_label,
-       cnt_probe_per_label],
-      feed_dict={
-          x_probe_ph: x_client_test,
-          y_probe_ph: y_client_test,
-          w_probe_ph: w_probe
-         }
-       )
 
 #------------------------------------definitions of PH and Stab classes----------------------------
     # print('loaded shared weights')
     loss_history_per_label = [[] for _ in range(NUM_CLASSES)]
     f1_history_per_label  =[[] for _ in range(NUM_CLASSES)]
     loss_ph_per_label = [
-      PageHinkley(CURRENT_AGENT,delta=0.002, lambd=0.08, min_instances=10,signal_type="loss")
+      PageHinkley(CURRENT_AGENT,delta=0.02, lambd=5.5, min_instances=15,signal_type="loss")
       for _ in range(NUM_CLASSES)
       ]
     f1_ph_per_label = [
-      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.1, min_instances=10, signal_type="f1-score")
+      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.001, min_instances=5, signal_type="f1-score")
       for _ in range(NUM_CLASSES)
       ]
     
-    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=2.0)
+    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=1.5)
 #--------------------------------------------------------------------------------------------------------
+    logits_post = agent_model(x, training=False)
+    per_ex_loss_post = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_int, logits=logits_post)
 
-    start_offset = 0
+    update_accum_op, read_agg, reset_accum_op = build_2step_accumulators(
+      logits=logits_post,
+      y_int=y_int,
+      num_classes=NUM_CLASSES,
+      per_example_loss=per_ex_loss_post,
+      scope="train_accum2"
+     )
+      
+    sess.run(tf.compat.v1.global_variables_initializer())
+    sess.run(reset_accum_op)
+
     
+#----------------------------------------------------------------------------------------------------
+ 
+    print("Num training steps: {}".format(num_steps))
+    start_offset = 0
     agg_k=0
     agsteps_since_drift = 0  # Python-side counter
     agent_drift = []
-    _reset_accumulators(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc)
-    print("Num training steps: {}".format(num_steps))
     DRIFT_FLAG = False
 #-----------------------------------------------------training ----------------------
+    sess.run(tf.compat.v1.global_variables_initializer())
+    sess.run(reset_accum_op)
+
     for step in range(num_steps):
-        if start_offset >= batch_size:
-          break
-        end_offset = min(start_offset + train_batchsize, batch_size)
+      if start_offset >= batch_size:
+         break
+      end_offset = min(start_offset + train_batchsize, batch_size)
 
-        X_batch = x_batch[start_offset: end_offset]
-        Y_batch = y_batch[start_offset: end_offset]
+      X_batch = x_batch[start_offset:end_offset]
+      Y_batch = y_batch[start_offset:end_offset]
 
-        wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
-          # print("For step: {} X_batch: {}, Y_batch: {}".format(step, X_batch, Y_batch))
-                 
-        train_loss_val, _ = sess.run(
-                  [weighted_loss, train_op],
-                  feed_dict={
-                  x: X_batch,
-                  y: Y_batch,
-                  sample_w: wb
-               }
-          )
-# 2) compute probe AFTER update
-        pred_probe_after, per_ex_loss_probe_after = sess.run(
-         [pred_probe, per_ex_loss_probe],
-         feed_dict={x_probe_ph: x_client_test, y_probe_ph: y_client_test, w_probe_ph: w_probe}
-         )
-        
-        _update_from_minibatch(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc,
-                        y_client_test,
-                        pred_probe_after,
-                        per_ex_loss_probe_after,
-                        NUM_CLASSES)
-        agg_k += 1
+      wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
 
-        if(agg_k % AGG_STEPS==0):
-            
-           if ((DRIFT_FLAG==False) or (DRIFT_FLAG==True and agsteps_since_drift >= COOLDOWN_STEPS)):
-              
-              DRIFT_FLAG = detect_drift(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc, eps, NUM_CLASSES, loss_history_per_label, loss_ph_per_label, 
-                                        f1_history_per_label, f1_ph_per_label, stability, agent_drift, agsteps_since_drift,
+    # Step 1: training update (pre-update loss not needed unless you want it)
+      sess.run(train_op, feed_dict={x: X_batch, y: Y_batch, sample_w: wb})
+
+    # Step 2: post-update stats accumulation
+      sess.run(update_accum_op, feed_dict={x: X_batch, y: Y_batch})
+
+    # Move to next batch  ✅
+      start_offset = end_offset
+
+      agg_k += 1
+      if agg_k % AGG_STEPS == 0:
+          agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
+          sess.run(reset_accum_op)
+          if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
+                  DRIFT_FLAG = detect_drift(agg, eps, NUM_CLASSES, stability, agent_drift, agsteps_since_drift,
                                         reset_ema_op, sess, lr_var, alpha_var, CURRENT_AGENT)
-              if(DRIFT_FLAG==True):
-                  agsteps_since_drift = 0
-           else:
-             agsteps_since_drift += 1
-             if(agsteps_since_drift==COOLDOWN_STEPS):
-                 sess.run(lr_var.assign(LR_STABLE))              
-                 sess.run(alpha_var.assign(ALPHA_STABLE))
-    
-           _reset_accumulators(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc)
-           agg_k = 0
-         
-        start_offset = end_offset
+                  if(DRIFT_FLAG==True):
+                    agsteps_since_drift = 0
 
+          elif (DRIFT_FLAG==True) and (agsteps_since_drift<COOLDOWN_STEPS):
+                  agsteps_since_drift += 1
+                  if(agsteps_since_drift==COOLDOWN_STEPS):
+                      sess.run(lr_var.assign(LR_STABLE))              
+                      sess.run(alpha_var.assign(ALPHA_STABLE))
+                      DRIFT_FLAG = False
+            
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
+
 
 
     local_weights = agent_model.get_weights()
@@ -355,88 +258,102 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     return
 
 
-def detect_drift(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc,eps, num_classes,loss_history_per_label,
-                 loss_ph_per_label,f1_history_per_label, f1_ph_per_label, stability, agent_drift, steps_since_drift, 
-                 reset_ema_op, sess, lr_var, alpha_var, CURRENT_AGENT):
-    
-   act_pos, pll_val, f1l_val, f1m_val = _compute_metrics_from_acc(cm_probe_acc, loss_probe_sum_acc, cnt_probe_acc,eps)
-           
-   pll_val = np.nan_to_num(pll_val, nan=0.0)
-   f1l_val = np.nan_to_num(f1l_val, nan=0.0)
 
-   any_drift  = False
-   loss_drift = False
-   f1_drift   = False
-          # probe_loss_scalar = np.nanmean(pll_val)
-# or (slightly more robust to imbalance)
-   probe_loss_scalar = np.nansum(pll_val * cnt_probe_acc) / (np.sum(cnt_probe_acc) + eps)
-   unstable, stats = stability.update(probe_loss_scalar)   
+def detect_drift(
+    agg,
+    *,
+    eps,
+    num_classes,
+    min_label_ct,
+    stability,
+    loss_ph_per_label,
+    f1_ph_per_label,
+    loss_history_per_label,
+    f1_history_per_label,
+    agent_drift,
+    reset_ema_op,
+    sess,
+    lr_var,
+    alpha_var,
+    CURRENT_AGENT,
+    # adaptation constants
+    LR_UNSTABLE,
+    LR_CD_DRIFT,
+    ALPHA_CD_DRIFT,
+    ALPHA_CS_DRIFT,
+):
+    """
+    Uses aggregated stats in `agg` (over your AGG_STEPS window) to detect drift.
 
-          
-   for c in range(num_classes):
-    # ----- loss signal: LEVEL -----
-              loss_c = float(pll_val[c])  
+    agg keys expected:
+      - "label_counts"  [C] int
+      - "loss_per_label" [C] float
+      - "f1_per_label"   [C] float
+      - "f1_macro"       scalar
+      - "loss"           scalar
+    """
 
-              if np.isfinite(loss_c) and cnt_probe_acc[c]  >= MIN_LABEL_CT:
-                 
+    lbl_counts = np.asarray(agg["label_counts"], dtype=np.float32)         # [C]
+    pll_val    = np.asarray(agg["loss_per_label"], dtype=np.float32)       # [C]
+    f1l_val    = np.asarray(agg["f1_per_label"], dtype=np.float32)         # [C]
 
-                  loss_history_per_label[c].append(loss_c)
-                  ld = loss_ph_per_label[c].update(loss_c)   # PH will self-gate via min_instances
-                  if ld:
-                   loss_ph_per_label[c].reset()
-                  loss_drift |= ld
-                  any_drift  |= ld
+    # Optional, if you want them:
+    # f1m_val    = float(agg["f1_macro"])
+    # lossm_val  = float(agg["loss"])
 
-    # ----- F1 signal: ERROR LEVEL -----
-                          # <-- level
-              f1_c = float(f1l_val[c])  
+    pll_val = np.nan_to_num(pll_val, nan=0.0, posinf=0.0, neginf=0.0)
+    f1l_val = np.nan_to_num(f1l_val, nan=0.0, posinf=0.0, neginf=0.0)
 
-              if np.isfinite(f1_c) and cnt_probe_acc[c] >= MIN_LABEL_CT:
+    # Stability test on a scalar overall loss (count-weighted per-label loss)
+    probe_loss_scalar = float(np.nansum(pll_val * lbl_counts) / (np.sum(lbl_counts) + eps))
+    unstable, stab_stats = stability.update(probe_loss_scalar)
 
-                  f1_c = min(max(f1_c, 0.0), 1.0)
-                  err_f1 = 1.0 - f1_c                # higher = worse
-                  f1_history_per_label[c].append(err_f1)
-                  fd = f1_ph_per_label[c].update(err_f1)
-                  if fd:
-                   f1_ph_per_label[c].reset()
-                  f1_drift |= fd
-                  any_drift |= fd
+    loss_drift = False
+    f1_drift   = False
 
-        
-   if unstable and "u" not in agent_drift:
-                agent_drift.append("u")
-                driftstr = "-".join(agent_drift)
-                print(f"Drift {driftstr} detected in client: {CURRENT_AGENT}")
-                sess.run(lr_var.assign(LR_UNSTABLE))
-                drift_flag = True
-                unstable = False
-            
-   elif loss_drift and f1_drift and "cd" not in agent_drift:
-                agent_drift.append("cd")
-                driftstr = "-".join(agent_drift)
-                print(f"Drift {driftstr} detected in client: {CURRENT_AGENT}")
-                sess.run(reset_ema_op)
-                sess.run(lr_var.assign(LR_CD_DRIFT))              
-                sess.run(alpha_var.assign(ALPHA_CD_DRIFT))
-                drift_flag = True
-                loss_drift = False
-                f1_drift = False
-                any_drift = False
-   elif loss_drift and "cs" not in agent_drift:
-                agent_drift.append("cs")
-                driftstr = "-".join(agent_drift)
-                print(f"Drift {driftstr} detected in client: {CURRENT_AGENT}")       
-                sess.run(alpha_var.assign(ALPHA_CS_DRIFT))
-                drift_flag = True
-                loss_drift = False
-                f1_drift = False
-                any_drift=False
-   else:
-               drift_flag = False
-               loss_drift = False
-               f1_drift = False
-               any_drift = False
-               
-   return drift_flag
+    for c in range(num_classes):
+        if lbl_counts[c] < min_label_ct:
+            continue
+
+        # ---- loss PH (level) ----
+        loss_c = float(pll_val[c])
+        if np.isfinite(loss_c):
+            loss_history_per_label[c].append(loss_c)
+            ld = bool(loss_ph_per_label[c].update(loss_c))
+            loss_drift |= ld
+
+        # ---- F1 PH on error level (1 - f1) ----
+        f1_c = float(f1l_val[c])
+        if np.isfinite(f1_c):
+            f1_c = min(max(f1_c, 0.0), 1.0)
+            err_f1 = 1.0 - f1_c
+            f1_history_per_label[c].append(err_f1)
+            fd = bool(f1_ph_per_label[c].update(err_f1))
+            f1_drift |= fd
+
+    # Decision logic (your original ordering)
+    drift_flag = False
+
+    if unstable and "u" not in agent_drift:
+        agent_drift.append("u")
+        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
+        sess.run(lr_var.assign(LR_UNSTABLE))
+        drift_flag = True
+
+    elif loss_drift and f1_drift and "cd" not in agent_drift:
+        agent_drift.append("cd")
+        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
+        sess.run(reset_ema_op)
+        sess.run(lr_var.assign(LR_CD_DRIFT))
+        sess.run(alpha_var.assign(ALPHA_CD_DRIFT))
+        drift_flag = True
+
+    elif loss_drift and "cs" not in agent_drift:
+        agent_drift.append("cs")
+        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
+        sess.run(alpha_var.assign(ALPHA_CS_DRIFT))
+        drift_flag = True
+
+    return drift_flag
 
               
