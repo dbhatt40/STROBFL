@@ -404,7 +404,7 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [12000,32000,52000,72000]
+            phase_offsets = [12000,32000,52000,72000,12000,32000,52000,72000,12000,32000]
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
@@ -443,7 +443,7 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [12000,32000,52000,72000]
+            phase_offsets = [12000,32000,52000,72000,12000,32000,52000,72000,12000,32000]
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
@@ -651,6 +651,84 @@ def aggregate_with_rbf_and_aging(
 
     # ----- 6) Combine all three multiplicatively + renormalize -----
     combined_w = sample_w * sim_scores * age_scores
+    combined_w = np.maximum(combined_w, eps)
+    combined_w = combined_w / (combined_w.sum() + eps)
+    print("combined weights with rbf and aging:", combined_w)
+
+    # ----- 7) Apply weighted average of updates to global weights -----
+    new_global_weights = []
+    for layer_idx in range(len(global_weights)):
+        agg_update_layer = sum(
+            combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
+        )
+        new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
+
+    return new_global_weights
+
+
+def aggregate_with_fedprox(
+    global_weights,
+    num_clients,
+    client_dict,
+    agent_list,
+    client_num_samples,
+    gamma=1.0,
+    eps=1e-12,
+    age_lambda=1.0          # 0.0 disables aging (all ages weight = 1)
+    ):
+    """
+    FedAvg * RBF-similarity * Aging aggregation.
+
+    Aging factor uses: age_score = exp(-age_lambda * age)
+    where age = current_time - timeofupdate.
+    """
+    current_time=None
+    if current_time is None:
+        current_time = time.time()  # seconds since epoch by default
+
+    if num_clients == 0:
+        return [w.copy() for w in global_weights]
+
+    # ----- 1) Collect client updates + timestamps -----
+    client_updates = []
+    client_times = []
+
+    for k in range(num_clients):
+        entry = client_dict[str(agent_list[k])]
+        t_u = client_dict[str(agent_list[k]) + "_time"]
+        client_updates.append(entry)
+        client_times.append(t_u)
+
+     # ----- 4) FedAvg-style sample weights -----
+    sample_w = np.asarray(client_num_samples, dtype=float)
+    sample_w = np.maximum(sample_w, 0.0)
+    if sample_w.sum() <= 0:
+        sample_w = np.ones_like(sample_w)
+    sample_w = sample_w / (sample_w.sum() + eps)
+
+    # ----- 5) Aging weights -----
+    # If age_lambda == 0 => all ones (no aging).
+    age_scores = np.ones(num_clients, dtype=float)
+
+    if age_lambda and age_lambda > 0.0:
+        for k in range(num_clients):
+            t_u = client_times[k]
+            if t_u is None:
+                # If no timestamp, treat as "fresh" (age=0) OR you can treat as old.
+                age = 0.0
+            else:
+                age = float(current_time) - float(t_u)
+            # decay: newer => larger weight
+            age_scores[k] = np.exp(-age_lambda * max(age, 0.0))
+
+        age_scores = np.maximum(age_scores, eps)
+        age_scores = age_scores / (age_scores.sum() + eps)
+    else:
+        # normalized ones (optional)
+        age_scores = age_scores / (age_scores.sum() + eps)
+
+    # ----- 6) Combine all three multiplicatively + renormalize -----
+    combined_w = sample_w * age_scores
     combined_w = np.maximum(combined_w, eps)
     combined_w = combined_w / (combined_w.sum() + eps)
     print("combined weights with rbf and aging:", combined_w)
