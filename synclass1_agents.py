@@ -43,6 +43,7 @@ ALPHA_CD_DRIFT = 0
 ALPHA_UNSTABLE = ALPHA_STABLE*0.25
 
 COOLDOWN_STEPS = 2
+WARMUP_STEPS = 4
 NUM_CLASSES = 4
 AGG_STEPS = 2          # 2 steps * minibatch 10 => effective metric batch 20
 MIN_LABEL_CT = 5        # require >=2 true samples of a label in the aggregated window before PH update
@@ -122,6 +123,7 @@ def detect_drift(
             ld = bool(loss_ph_per_label[c].update(loss_c))
             loss_drift |= ld
 
+
         # ---- F1 PH on error level (1 - f1) ----
         f1_c = float(f1l_val[c])
         if np.isfinite(f1_c):
@@ -133,26 +135,30 @@ def detect_drift(
 
     # Decision logic (your original ordering)
     drift_flag = False
-
-    if unstable and "u" not in agent_drift:
-        agent_drift.append("u")
-        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
-        sess.run(lr_var.assign(LR_UNSTABLE))
-        drift_flag = True
-
-    elif loss_drift and f1_drift and "cd" not in agent_drift:
+    
+    if loss_drift and f1_drift and "cd" not in agent_drift:
         agent_drift.append("cd")
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
+        old_lr, old_alpha = sess.run([lr_var, alpha_var])
         sess.run(reset_ema_op)
-        sess.run(lr_var.assign(LR_CD_DRIFT))
-        sess.run(alpha_var.assign(ALPHA_CD_DRIFT))
+        sess.run(lr_var.assign(old_lr*1.5))
+        sess.run(alpha_var.assign(0))
         drift_flag = True
-
     elif loss_drift and "cs" not in agent_drift:
         agent_drift.append("cs")
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
-        sess.run(alpha_var.assign(ALPHA_CS_DRIFT))
+        old_lr, old_alpha = sess.run([lr_var, alpha_var])
+        sess.run(alpha_var.assign(old_alpha*0.8))
         drift_flag = True
+    elif unstable and "u" not in agent_drift:
+        agent_drift.append("u")
+        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
+        old_lr, old_alpha = sess.run([lr_var, alpha_var])
+        sess.run(lr_var.assign(old_lr*1.5))
+        drift_flag = True           
+ 
+
+
 
     return drift_flag
 
@@ -233,15 +239,15 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     loss_history_per_label = [[] for _ in range(NUM_CLASSES)]
     f1_history_per_label  =[[] for _ in range(NUM_CLASSES)]
     loss_ph_per_label = [
-      PageHinkley(CURRENT_AGENT,delta=0.02, lambd=0.1, min_instances=15,signal_type="loss")
+      PageHinkley(CURRENT_AGENT,delta=0.1, lambd=0.1, min_instances=15,signal_type="loss")
       for _ in range(NUM_CLASSES)
       ]
     f1_ph_per_label = [
-      PageHinkley(CURRENT_AGENT, delta=0.01, lambd=0.01, min_instances=10, signal_type="f1-score")
+      PageHinkley(CURRENT_AGENT, delta=0.05, lambd=0.02, min_instances=12, signal_type="f1-score")
       for _ in range(NUM_CLASSES)
       ]
     
-    stability = LossStabilityTest(window=10, min_increase=0.05, std_mult=3.5)
+    stability = LossStabilityTest(window=10, min_increase=0.1, std_mult=3.5)
 #--------------------------------------------------------------------------------------------------------
     logits_post = agent_model(x, training=False)
     per_ex_loss_post = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_int, logits=logits_post)
@@ -288,9 +294,12 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
 
     # Move to next batch  ✅
       start_offset = end_offset
+      
+      
 
       agg_k += 1
-      if agg_k % AGG_STEPS == 0:
+      if (agg_k % AGG_STEPS == 0) and (step >= WARMUP_STEPS) :
+
           agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
           sess.run(reset_accum_op)
           if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
@@ -306,6 +315,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
                       sess.run(lr_var.assign(LR_STABLE))              
                       sess.run(alpha_var.assign(ALPHA_STABLE))
                       DRIFT_FLAG = False
+                      agsteps_since_drift = 0
             
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
 

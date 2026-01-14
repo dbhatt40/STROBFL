@@ -666,7 +666,7 @@ def aggregate_with_rbf_and_aging(
     return new_global_weights
 
 
-def aggregate_with_fedprox(
+def aggregate_with_sw_fedavg(
     global_weights,
     num_clients,
     client_dict,
@@ -791,11 +791,11 @@ class PageHinkley:
 
         # Page-Hinkley statistic
         self.ph_stat = self.cum_sum - self.min_cum_sum
-
+       
         # Drift decision
         if self.t > self.min_instances and self.ph_stat > self.lambd:
             self.drift = True
-            print("PH stat for signal agent, t, val, signal:",self.agent, self.t, self.ph_stat, self.signal_type)
+           #print("------PH stat for signal agent, t, val, signal:",self.agent, self.t, self.ph_stat, self.signal_type)
             # You can either reset here or leave it accumulating
          #   self.reset()
             return True
