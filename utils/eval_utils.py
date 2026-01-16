@@ -98,7 +98,7 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
             [loss, prediction],
             feed_dict={x: X_test_slice, y: Y_feed}
         )
-
+       # print(f"Loss value: {loss_val} and predictions: {pred_np_i}")
         eval_loss += loss_val * batch_size
 
         # --- store preds with correct slicing ---
@@ -106,19 +106,22 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
             pred_np[start:end, 0:1] = pred_np_i.reshape(-1, 1)
         else:
             pred_np[start:end, :] = pred_np_i
-
+       # print(f"Pred np : {pred_np}")
     eval_loss = eval_loss / total_count if total_count > 0 else float('nan')
+    print("Eval loss {eval_loss} total count {total_count}")
     sess.close()
 
     # --- compute success metric ---
     if args.dataset == 'air-quality':
         Y_true = Y_test.astype('float32').reshape(-1, 1)
-
+        print("Y_true:", Y_true)
+    
         mse = float(np.mean((pred_np - Y_true) ** 2))
+        print(f"MSE value {mse}")
         y_mean = float(np.mean(Y_true))
         sse = float(np.sum((pred_np - Y_true) ** 2))
         sst = float(np.sum((Y_true - y_mean) ** 2))
-
+        print(f"SSE: {sse}")
         r2 = 1.0 - sse / sst if sst > 0 else float('nan')
         eval_success = 100.0 * r2
         # (optional) you may want to return mse too
