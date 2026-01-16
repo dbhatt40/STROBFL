@@ -12,17 +12,10 @@ import numpy as np
 import pandas as pd
 
 from tensorflow.keras import layers, Model, Input
-from keras.models import Model
-from keras.layers import Input, Dense, Dropout, Conv1D,MaxPooling1D 
-from keras.layers import BatchNormalization, GlobalAveragePooling1D 
-
 from sklearn.preprocessing import StandardScaler
 
 import global_vars as gv
-
-import os
 from typing import Dict, Tuple, Optional, Iterable
-from sklearn.preprocessing import StandardScaler
 
 
 def split_clients_xy(

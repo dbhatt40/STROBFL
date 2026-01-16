@@ -65,53 +65,71 @@ def eval_setup(global_weights):
 
 def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
     args = gv.args
-    # args = gv.args
     print("Shape of x, y test slice:", X_test.shape, Y_test.shape)
+
     x, y, sess, prediction, loss = eval_setup(global_weights)
 
-    pred_np = np.zeros((len(X_test), gv.NUM_CLASSES))
-    eval_loss = 0.0
-	
     num_samples = len(X_test)
-    num_batches = int(np.ceil(num_samples /gv.BATCH_SIZE))
+    num_batches = int(np.ceil(num_samples / gv.BATCH_SIZE))
     total_count = 0
-    eval_loss = 0.0    
+    eval_loss = 0.0
+
+    # --- allocate predictions with correct shape ---
+    if args.dataset == 'air-quality':
+        pred_np = np.zeros((num_samples, 1), dtype=np.float32)   # regression
+    else:
+        pred_np = np.zeros((num_samples, gv.NUM_CLASSES), dtype=np.float32)  # classification
+
     for i in range(num_batches):
         start = i * gv.BATCH_SIZE
         end   = min((i + 1) * gv.BATCH_SIZE, num_samples)
+
         X_test_slice = X_test[start:end]
         Y_test_slice = Y_test[start:end]
-        # Y_test_cat_slice = np_utils.to_categorical(Y_test_slice)
         batch_size = X_test_slice.shape[0]
         total_count += batch_size
-        if(args.dataset=='air-quality'):
-          Y_test_slice = Y_test_slice.astype('float32').reshape(-1, 1)         
+
+        if args.dataset == 'air-quality':
+            Y_feed = Y_test_slice.astype('float32').reshape(-1, 1)
         else:
-         Y_test_slice = Y_test_slice.astype('int64') 
-        loss_val, pred_np_i = sess.run([loss,prediction], feed_dict={x: X_test_slice, y: Y_test_slice})
-               # print("Shape of prediction", pred_np_i.shape)
-        eval_loss += loss_val*batch_size 
-        pred_np[start:end,:] = pred_np_i
+            Y_feed = Y_test_slice.astype('int64')
+
+        loss_val, pred_np_i = sess.run(
+            [loss, prediction],
+            feed_dict={x: X_test_slice, y: Y_feed}
+        )
+
+        eval_loss += loss_val * batch_size
+
+        # --- store preds with correct slicing ---
+        if args.dataset == 'air-quality':
+            pred_np[start:end, 0:1] = pred_np_i.reshape(-1, 1)
+        else:
+            pred_np[start:end, :] = pred_np_i
 
     eval_loss = eval_loss / total_count if total_count > 0 else float('nan')
     sess.close()
 
-    if(args.dataset=='air-quality'):
-         Y_true = Y_test.reshape(-1,1)
-         mse = np.mean((pred_np - Y_true)**2)
-         y_mean = np.mean(Y_true)
-         sse = np.sum((pred_np - Y_true)**2)
-         sst = np.sum((Y_true - y_mean) **2)
-         r2 = 1.0 - sse/sst if sst>0 else float('nan') 		    
-         eval_success = 100.0 * r2            
+    # --- compute success metric ---
+    if args.dataset == 'air-quality':
+        Y_true = Y_test.astype('float32').reshape(-1, 1)
+
+        mse = float(np.mean((pred_np - Y_true) ** 2))
+        y_mean = float(np.mean(Y_true))
+        sse = float(np.sum((pred_np - Y_true) ** 2))
+        sst = float(np.sum((Y_true - y_mean) ** 2))
+
+        r2 = 1.0 - sse / sst if sst > 0 else float('nan')
+        eval_success = 100.0 * r2
+        # (optional) you may want to return mse too
     else:
-         eval_success = 100.0 * \
-              np.sum(np.argmax(pred_np, 1) ==Y_test) / len(Y_test)
-			  
+        eval_success = 100.0 * np.mean(np.argmax(pred_np, 1) == Y_test)
+
     if return_dict is not None:
         return_dict['success_thresh'] = eval_success
 
     return eval_success, eval_loss
+
 
 
 def eval_func(X_test, Y_test, t, return_dict, mal_data_X=None, mal_data_Y=None, global_weights=None):

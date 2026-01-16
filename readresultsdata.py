@@ -13,10 +13,11 @@ from glob import glob
 
 files = []
 
-files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I0/output_global_eval_loss.txt")
-files  += glob("./data/synthetic-class1/strobfl-strobfl/D0I3/output_global_eval_loss.txt")
-files  += glob("./data/synthetic-class1/adam-avg/D0I0/output_global_eval_loss.txt")
-files  += glob("./data/synthetic-class1/adam-avg/D0I3/output_global_eval_loss.txt")
+files  += glob("./data/synthetic-class1/strobfl-strobfl/d4si4.txt")
+files  += glob("./data/synthetic-class1/adam-avg/d4si4.txt")
+
+# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4II0.4.txt")
+# files  += glob("./data/synthetic-class1/adam-avg/D4II0.4.txt")
 
 
 #files  += glob("./data/synthetic-class1/strobfl-strobfl/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
@@ -48,7 +49,7 @@ for f in files:
     print(f)
 
 dfs = []
-methods = ['STROBFL- 0', 'STROBFL - 0.3', 'STROBFL - 0.6', 'STROBFL - 1.0']
+methods = ['STROBFL', 'ADAM']
 #methods = ['Adam-No Drift','STROBFL-No Drift','Adam-4D/I','STROBFL-4D/I','Adam-4D/S','STROBFL-4D/S']
 
 values = []
@@ -75,36 +76,62 @@ for f in files:
     
     
 
-    dfs.append(df)
+#     dfs.append(df)
 
-all_df = pd.concat(dfs, ignore_index=True)
-print(all_df.head())
+# all_df = pd.concat(dfs, ignore_index=True)
+# print(all_df.head())
 
 
 
-sns.set(style="whitegrid")
+# sns.set(style="whitegrid")
 
-plt.figure(figsize=(10, 6))
-ax = sns.lineplot(
-    data=all_df,
-    x="t",
-    y="eval_success",
-    hue="level4",      # method
-    style="level4",    # run
-    markers=True
-)
+# plt.figure(figsize=(10, 6))
+# ax = sns.lineplot(
+#     data=all_df,
+#     x="t",
+#     y="eval_success",
+#     hue="level4",      # method
+#     style="level4",    # run
+#     markers=True
+# )
 
-ax.legend(
-    title="Method",
-    labelspacing=1.2,   # vertical space between entries
-    handlelength=3.0,   # length of line/marker handle
-    handletextpad=1.2,  # space between handle and text
-    borderpad=1.2       # padding inside legend box
-)
-plt.xlabel("Round (t)")
-plt.ylabel("Validation Accuracy (%)")
-plt.title("Server Validation Accuracy across rounds (Imbalance Variation)")
-plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
-plt.tight_layout()
-plt.show()
+# ax.legend(
+#     title="Method",
+#     labelspacing=1.2,   # vertical space between entries
+#     handlelength=3.0,   # length of line/marker handle
+#     handletextpad=1.2,  # space between handle and text
+#     borderpad=1.2       # padding inside legend box
+# )
+
+# ax.axvspan(
+#     8, 20,
+#     alpha=0.15,
+#     color="red",
+#     label="Concept Drift"
+# )
+
+# ax.axvspan(
+#     30, 42,
+#     alpha=0.15,
+#     color="green",
+#     label="Covariate Shift"
+# )
+
+# # Avoid duplicate legend entries
+# handles, labels = ax.get_legend_handles_labels()
+# unique = dict(zip(labels, handles))
+# ax.legend(
+#     unique.values(),
+#     unique.keys(),
+#     title="Method",
+#     bbox_to_anchor=(1, 1),
+#     loc="upper left"
+# )
+
+# plt.xlabel("Round (t)")
+# plt.ylabel("Validation Accuracy (%)")
+# plt.title("Server Validation Accuracy across rounds- 50% shared drift & 0.4 imbalance")
+# plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
+# plt.tight_layout()
+# plt.show()
 

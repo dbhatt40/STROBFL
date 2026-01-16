@@ -69,6 +69,9 @@ import seaborn as sns
 # plt.tight_layout()
 # plt.show()
 
+from glob import glob
+
+
 
 
 def read_eval_csv(
@@ -374,3 +377,170 @@ def plot_imbalance_vs_drift_facets(
     plt.show()
 
 
+
+file  = "results_data.csv"
+df = read_eval_csv(file,round_col="t",
+   agent_col="i",
+  success_col="eval_success",
+  loss_col="eval_loss",
+  drift_col="drift",
+   delayed_col="delayed")
+
+group_by_round(df)
+
+# plot_drift_heatmap(
+#     df,
+#     round_col="round",
+#     agent_col="agent",
+#     drift_col="drift",
+#     title="Drift heatmap",
+#     figsize=None,
+#     show_colorbar=True,
+#     xtick_every=None,
+#     ytick_every=None,
+#      )
+# ax = plt.gca()
+
+# concept_shift = (8, 20)     # e.g., concept drift window
+# cov_shift     = (30, 42)    # e.g., covariate shift window
+
+# def add_band(ax, start, end, color, label, alpha=0.15, linestyle="--"):
+#     # shade (align to heatmap cell edges)
+#     ax.axvspan(start - 0.5, end + 0.5, alpha=alpha, color=color, zorder=10)
+#     # boundaries
+#     ax.axvline(start - 0.5, linestyle=linestyle, linewidth=1.5, color=color, zorder=11)
+#     ax.axvline(end + 0.5,   linestyle=linestyle, linewidth=1.5, color=color, zorder=11)
+#     # label near top of plot
+#     y0, y1 = ax.get_ylim()
+#     y_text = min(y0, y1)  # works even if y is inverted
+#     ax.text(
+#         x=(start + end) / 2,
+#         y=y_text,
+#         s=label,
+#         color=color,
+#         ha="center",
+#         va="bottom",
+#         fontsize=11,
+#         fontweight="bold",
+#         zorder=12
+#     )
+
+# add_band(ax, *concept_shift, color="red",   label="Concept drift")
+# add_band(ax, *cov_shift,     color="blue",  label="Covariate shift")
+
+# plt.tight_layout()
+# plt.show()
+
+
+# drift_start, drift_end = 8, 20
+
+# # Shade columns [8,20] (align to cell edges)
+# ax.axvspan(drift_start - 0.5, drift_end + 0.5, alpha=0.15, color="red", zorder=10)
+
+# # Optional: boundary lines at start/end
+# ax.axvline(drift_start - 0.5, linestyle="--", linewidth=1.5, color="red", zorder=11)
+# ax.axvline(drift_end + 0.5, linestyle="--", linewidth=1.5, color="red", zorder=11)
+
+# # Optional: label at top
+# y_top = ax.get_ylim()[0]  # note: heatmaps often invert y
+# ax.text(
+#     x=(drift_start + drift_end) / 2,
+#     y=y_top,
+#     s="Drift window",
+#     color="red",
+#     ha="center",
+#     va="bottom",
+#     fontsize=11,
+#     fontweight="bold",
+#     zorder=12,
+# )
+
+# plt.tight_layout()
+# plt.show()
+
+
+# DRIFTED_CLIENTS = set(range(0, 3))
+# STATIONARY_CLIENTS = set(range(4, 8))
+# DRIFT_TOKENS = {"cs", "cd", "u"}
+# DRIFT_EPISODES = [(8, 20), (30,42)]
+
+# def detected_anywhere(series):
+#     for v in series:
+#         if pd.isna(v):
+#             continue
+#         tokens = set(str(v).lower().split("-"))
+#         if tokens & DRIFT_TOKENS:
+#             return True
+#     return False
+
+# TP = FN = FP = TN = 0
+
+# # Drifted clients (episode-based)
+# for cid in DRIFTED_CLIENTS:
+#     for ts, te in DRIFT_EPISODES:
+#         s = df[(df["agent"] == cid) & (df["round"].between(ts, te))]["drift"]
+#         if detected_anywhere(s):
+#             TP += 1
+#         else:
+#             FN += 1
+
+# # Stationary clients (ever detected)
+# for cid in STATIONARY_CLIENTS:
+#     s = df[df["agent"] == cid]["drift"]
+#     if detected_anywhere(s):
+#         FP += 1
+#     else:
+#         TN += 1
+
+# print("TP:", TP, "FN:", FN, "FP:", FP, "TN:", TN)
+
+
+# plot_df = pd.DataFrame({
+#     "Client Group": [
+#         "Drifted (0–3)", "Drifted (0–3)",
+#         "Stationary (4–8)", "Stationary (4–8)"
+#     ],
+#     "Outcome": ["TP", "FN", "FP", "TN"],
+#     "Count": [TP, FN, FP, TN]
+# })
+
+# sns.set(style="whitegrid")
+
+# plt.figure(figsize=(7, 5))
+# ax = sns.barplot(
+#     data=plot_df,
+#     x="Client Group",
+#     y="Count",
+#     hue="Outcome",
+# )
+
+# # Add value labels on bars
+# for container in ax.containers:
+#     ax.bar_label(container, fmt="%d", padding=3)
+
+# plt.title("Episodic Drift Detection Outcomes - Independent 50% drift, 0.4 Imbalance")
+# plt.ylabel("Count")
+# plt.xlabel("")
+# plt.legend(title="Outcome", frameon=True)
+# plt.tight_layout()
+# plt.show()
+
+
+
+
+
+
+
+print(f"""
++----------------------------------+
+|      Drift Detection Results     |
++----------------------------------+
+| Drifted clients (0–3)            |
+|   True Positive (TP): {TP:6d} |
+|   False Negative (FN): {FN:6d} |
++----------------------------------+
+| Stationary clients (4–8)         |
+|   False Positive (FP): {FP:6d} |
+|   True Negative (TN): {TN:6d} |
++----------------------------------+
+""")
