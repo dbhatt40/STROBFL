@@ -54,6 +54,9 @@ def split_clients_xy(
         if drop_extra_cols:
             drop_cols += list(drop_extra_cols)
         drop_cols = [c for c in drop_cols if c in df.columns]
+        
+        feature_cols = [c for c in df.columns if c not in drop_cols + [label_col]]
+        df = df.dropna(subset=feature_cols + [label_col])
 
         X_train = df.drop(columns=drop_cols, errors="ignore")
         Y_train = df[label_col]
@@ -142,6 +145,7 @@ def data_air_quality(
     if drop_na:
         df = df.dropna(subset=[timestamp_col, station_col])
 
+
     # Optional subset of stations
     if station_filter is not None:
         station_filter = set(int(s) for s in station_filter)
@@ -153,15 +157,18 @@ def data_air_quality(
     # Compute split index (earliest 10% for server test set)
     n_total = len(df)
     n_test = max(1, int(round(server_test_frac * n_total)))
-    server_test_df = df.iloc[:n_test].copy()
-    remaining_df = df.iloc[n_test:].copy()
+    n_train = n_total-n_test
+    train_df = df.iloc[:n_train]
+    test_df = df.iloc[n_train:]
+    # server_test_df = df.iloc[:n_test].copy()
+    # remaining_df = df.iloc[n_test:].copy()
 
     # Build per-client training sets from the remaining rows
     client_train_dfs: Dict[int, pd.DataFrame] = {}
-    if not remaining_df.empty:
+    if not train_df.empty:
         # Keep the intra-station chronological order
-        remaining_df = remaining_df.sort_values(by=[station_col, timestamp_col]).reset_index(drop=True)
-        for sid, g in remaining_df.groupby(station_col, sort=True):
+        train_df = train_df.sort_values(by=[station_col, timestamp_col]).reset_index(drop=True)
+        for sid, g in train_df.groupby(station_col, sort=True):
             # sid is pandas Int64; convert to int for dict key
             client_train_dfs[int(sid)] = g.reset_index(drop=True)
 
@@ -174,30 +181,64 @@ def data_air_quality(
 #             g.to_csv(os.path.join(output_dir, f"client_train_{sid}.csv"), index=False)
 # 	
 # =============================================================================
-    label_col = "PM2.5"   # or whatever your target column is
-    drop_cols = [timestamp_col, station_col]  # metadata columns not used as features
+    orig_station_ids = sorted(client_train_dfs.keys())
 
-    y_test = server_test_df[label_col].values               # shape (n_samples,)
-    X_test = server_test_df.drop(columns=drop_cols + [label_col]).values  # shape (n_samples, n_features)
-    client_xy = split_clients_xy(client_train_dfs,
-        label_col="PM2.5",          # change to your actual target column
+# Create mapping: station_id -> 0..K-1
+    station_to_client = {sid: i for i, sid in enumerate(orig_station_ids)}
+    client_to_station = {i: sid for sid, i in station_to_client.items()}
+
+    print("Station → Client ID mapping:", station_to_client)
+
+    label_col = "PM2.5"
+    drop_cols = [timestamp_col, station_col]
+    
+
+    y_test = test_df[label_col].to_numpy(dtype=np.float32)
+    X_test = test_df.drop(columns=drop_cols + [label_col]).to_numpy(dtype=np.float32)
+
+
+    client_xy = split_clients_xy(
+        client_train_dfs,
+        label_col=label_col,
         drop_extra_cols=(timestamp_col, station_col),
         as_numpy=True
-    )
-    x_train,y_train = client_xy[0]
-    X_scaler = StandardScaler().fit(x_train)
-    y_scaler = StandardScaler().fit(y_train.reshape(-1,1))
-	
-    X_test_scaler = X_scaler. transform(X_test)
-    y_test_scaler = y_scaler.transform(y_test.reshape(-1,1))
+        )
 
+# --- build global arrays for fitting scalers ---
+    X_all = np.concatenate([X for (X, Y) in client_xy.values()], axis=0).astype(np.float32)
+    y_all = np.concatenate([Y.reshape(-1, 1) for (X, Y) in client_xy.values()], axis=0).astype(np.float32)
 
-    scaled_client_xy={}
-    for sid, (X_train,Y_train) in client_xy.items():
-        X_train_scaled = X_scaler.fit_transform(X_train)
-        Y_train_scaled = y_scaler.fit_transform(Y_train.reshape(-1,1))		
-        scaled_client_xy[sid] = (X_train_scaled,Y_train_scaled)
-    return scaled_client_xy, X_test_scaler, y_test_scaler
+# Optional: impute NaNs using global training means (strongly recommended)
+    X_mean = np.nanmean(X_all, axis=0)
+    y_mean = np.nanmean(y_all, axis=0)
+
+    X_all = np.where(np.isfinite(X_all), X_all, X_mean)
+    y_all = np.where(np.isfinite(y_all), y_all, y_mean)
+
+    X_test = np.where(np.isfinite(X_test), X_test, X_mean)
+    y_test_2d = y_test.reshape(-1, 1)
+    y_test_2d = np.where(np.isfinite(y_test_2d), y_test_2d, y_mean)
+
+# --- fit scalers once ---
+    X_scaler = StandardScaler().fit(X_all)
+    y_scaler = StandardScaler().fit(y_all)
+
+# --- transform test once ---
+    X_test_scaled = X_scaler.transform(X_test)
+    y_test_scaled = y_scaler.transform(y_test_2d)
+    scaled_client_xy = {}
+    for sid, (X_tr, y_tr) in client_xy.items():
+        X_tr = X_tr.astype(np.float32)
+        y_tr = y_tr.astype(np.float32).reshape(-1, 1)
+
+    # same imputation as above
+        X_tr = np.where(np.isfinite(X_tr), X_tr, X_mean)
+        y_tr = np.where(np.isfinite(y_tr), y_tr, y_mean)
+
+        scaled_client_xy[sid] = (X_scaler.transform(X_tr), y_scaler.transform(y_tr))
+    X_Y_train_shards = {station_to_client[sid]: scaled_client_xy[sid] for sid in scaled_client_xy.keys()}
+
+    return  X_Y_train_shards, X_test_scaled, y_test_scaled
 
 
 def airquality_model():

@@ -21,7 +21,7 @@ from utils.eval_utils import eval_minimal
 from  utils.air_quality_utils import airquality_model
 import global_vars as gv
 
-from customSGD import CustomRuleSGD
+from customSGD import CustomRuleSGD, gradient_update_rule_factory
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
 
@@ -32,8 +32,10 @@ PER_LABEL_STATS = {
 }
 
 def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
-    tf.keras.backend.set_learning_phase(1)
-	
+    
+    tf.keras.backend.set_learning_phase(1)    
+    tf.reset_default_graph()
+    sess = tf.Session()
 
     args = gv.init()
     if lr is None:
@@ -45,26 +47,33 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
 
     shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
     pre_theta = None
-  		
-    x = tf.placeholder(shape=(None,gv.DATA_DIM), dtype=tf.float32)
-    y_true = tf.placeholder(shape=(None,gv.NUM_CLASSES), dtype=tf.float32)
-
+    
     agent_model = airquality_model()
-    y_pred = agent_model(x)
-    loss = tf.reduce_mean(tf.math.squared_difference(y_true, y_pred))
+    x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
+    y = tf.placeholder(shape=(None, 1), dtype=tf.float32, name="y")
+    logits = agent_model(x)
+    if pre_theta is not None:
+        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
+    else:
+        theta = shared_weights
+    agent_model.set_weights(theta)
+    
+    
+    prediction = logits
+    loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
+  		
    	
-    lr=0.001
-    alpha = 0.3
-
     if args.optimizer == 'adam':
+        lr=0.001
         optimizer = tf.train.AdamOptimizer(
             learning_rate=lr).minimize(loss)
-    elif args.optimizer == 'sgd':
-        optimizer = tf.train.GradientDescentOptimizer(
-            learning_rate=lr).minimize(loss)
     elif args.optimizer == 'strobfl_learn':
-        optimizer = CustomRuleSGD(
-            learning_rate=lr).minimize(loss)
+       lr=0.1
+       alpha = 0.3
+       alpha_var = tf.Variable(alpha, trainable=False, dtype=tf.float32, name="ema_alpha")
+       ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
+       optimizer = CustomRuleSGD(learning_rate=lr, update_rule=ema_rule)
+       train_op = optimizer.minimize(loss)
   
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
@@ -78,11 +87,7 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
     tf.compat.v1.keras.backend.set_session(sess)
     sess.run(tf.global_variables_initializer())
 # 
-    if pre_theta is not None:
-        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
-    else:
-        theta = shared_weights
-    agent_model.set_weights(theta)
+
     # print('loaded shared weights')
  	
 
@@ -98,7 +103,7 @@ def aq_agent(i, x_batch, y_batch, train_offsets, t, gpu_id, return_dict, results
         X_batch = x_batch[offset: (offset + args.B)]
         Y_batch = y_batch[offset: (offset + args.B)]
         Y_batch = Y_batch.astype('float32').reshape(-1, 1) 
-        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y_true: Y_batch})	
+        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch})	
         start_offset = offset
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
     b_new_offset = b_start_offset + train_size

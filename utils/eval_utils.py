@@ -59,13 +59,15 @@ def eval_setup(global_weights):
     sess.run(tf.global_variables_initializer())
 
     global_model.set_weights(global_weights_np)
+    has_nan = any(np.isnan(a).any() for a in global_weights_np)
+    has_inf = any(np.isinf(a).any() for a in global_weights_np)
+
 
     return x, y, sess, prediction, loss
 
 
 def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
     args = gv.args
-    print("Shape of x, y test slice:", X_test.shape, Y_test.shape)
 
     x, y, sess, prediction, loss = eval_setup(global_weights)
 
@@ -84,28 +86,41 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
         start = i * gv.BATCH_SIZE
         end   = min((i + 1) * gv.BATCH_SIZE, num_samples)
 
-        X_test_slice = X_test[start:end]
-        Y_test_slice = Y_test[start:end]
-        batch_size = X_test_slice.shape[0]
-        total_count += batch_size
+        Xs = X_test[start:end]
+        Ys = Y_test[start:end]
+        
 
+        
+        ok = np.isfinite(Xs).all(axis=1) & np.isfinite(Ys).all(axis=1)
+        # batch_size = X_test_slice.shape[0]
+        # total_count += batch_size
+        if not ok.any():
+            continue
         if args.dataset == 'air-quality':
-            Y_feed = Y_test_slice.astype('float32').reshape(-1, 1)
+          X_feed = Xs[ok].astype(np.float32)
+          Y_feed = Ys[ok].astype(np.float32).reshape(-1, 1)
+          if X_feed.shape[0] != Y_feed.shape[0]:
+            print("MISMATCH!", start, end, "X_feed", X_feed.shape, "Y_feed", Y_feed.shape, "ok.sum", ok.sum())
+            continue
         else:
-            Y_feed = Y_test_slice.astype('int64')
+            Y_feed = Ys.astype('int64')
 
-        loss_val, pred_np_i = sess.run(
+        loss_val, pred_i = sess.run(
             [loss, prediction],
-            feed_dict={x: X_test_slice, y: Y_feed}
+            feed_dict={x: X_feed, y: Y_feed}
         )
+
        # print(f"Loss value: {loss_val} and predictions: {pred_np_i}")
-        eval_loss += loss_val * batch_size
+        valid_bs = X_feed.shape[0]
+        total_count += valid_bs
+        eval_loss += loss_val * valid_bs
+      
 
         # --- store preds with correct slicing ---
         if args.dataset == 'air-quality':
-            pred_np[start:end, 0:1] = pred_np_i.reshape(-1, 1)
+           pred_np[start:end][ok, 0] = pred_i.reshape(-1).astype(np.float32)
         else:
-            pred_np[start:end, :] = pred_np_i
+            pred_np[start:end, :] = pred_i
        # print(f"Pred np : {pred_np}")
     eval_loss = eval_loss / total_count if total_count > 0 else float('nan')
     print("Eval loss {eval_loss} total count {total_count}")
@@ -113,20 +128,33 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
 
     # --- compute success metric ---
     if args.dataset == 'air-quality':
-        Y_true = Y_test.astype('float32').reshape(-1, 1)
-        print("Y_true:", Y_true)
-    
-        mse = float(np.mean((pred_np - Y_true) ** 2))
+        
+        y_true = np.asarray(Y_test, dtype=np.float32).reshape(-1)
+        pred_1d = np.asarray(pred_np, dtype=np.float32).reshape(-1)
+   # finite mask per-row for X_test (N,)
+        x_ok = np.isfinite(X_test).all(axis=1)
+        mask = x_ok & np.isfinite(y_true) & np.isfinite(pred_1d)
+        if mask.sum() == 0:
+          mse = np.nan
+        else:
+          diff = pred_1d[mask] - y_true[mask]
+          mse = float(np.mean(diff * diff))
+
         print(f"MSE value {mse}")
-        y_mean = float(np.mean(Y_true))
-        sse = float(np.sum((pred_np - Y_true) ** 2))
-        sst = float(np.sum((Y_true - y_mean) ** 2))
+  
+        y_v = y_true[mask]
+        p_v = pred_1d[mask]
+
+        y_mean = float(np.mean(y_v))
+        sse = float(np.sum((p_v - y_v) ** 2))
+        sst = float(np.sum((y_v - y_mean) ** 2))
         print(f"SSE: {sse}")
+
         r2 = 1.0 - sse / sst if sst > 0 else float('nan')
         eval_success = 100.0 * r2
         # (optional) you may want to return mse too
     else:
-        eval_success = 100.0 * np.mean(np.argmax(pred_np, 1) == Y_test)
+        eval_success = 100.0 * np.mean(np.argmax(pred_1d, 1) == y_true)
 
     if return_dict is not None:
         return_dict['success_thresh'] = eval_success

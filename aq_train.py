@@ -22,6 +22,7 @@ tf.get_logger().setLevel(logging.ERROR)
 from multiprocessing import Process
 from utils.io_utils import file_write_resultsdata
 import global_vars as gv
+from aq_agents_strsaga import aq_agent_strsaga
 
 
 from utils.eval_utils import eval_func
@@ -76,7 +77,10 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
 				i = curr_agents[k]
 				X_batch, Y_batch = X_Y_train_shards[i]        
 				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
-				p = Process(target=aq_agent			 , args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
+				if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
+				  p = Process(target=aq_agent, args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
+				elif('strsaga' in gv.optimizer):
+  				  p = Process(target=aq_agent_strsaga, args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
 				p.start()
 				process_list.append(p)
 				k += 1	
