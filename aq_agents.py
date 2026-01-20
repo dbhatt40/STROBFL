@@ -22,7 +22,7 @@ from  utils.air_quality_utils import airquality_model
 import global_vars as gv
 import time
 
-from synclass1_utils import PageHinkley, LossStabilityTest
+from utils.synclass1_utils import ZPageHinkley, LossStabilityTest
 from customSGD import CustomRuleSGD, gradient_update_rule_factory
 from utils.synclass1_utils import build_2step_accumulators
 
@@ -38,19 +38,15 @@ ALPHA_CD_DRIFT = 0
 ALPHA_UNSTABLE = ALPHA_STABLE*0.25
 
 COOLDOWN_STEPS = 2
-WARMUP_STEPS = 4
-NUM_CLASSES = 4
-AGG_STEPS = 2          # 2 steps * minibatch 10 => effective metric batch 20
-MIN_LABEL_CT = 5        # require >=2 true samples of a label in the aggregated window before PH update
+WARMUP_STEPS = 10
+
 
 
 def detect_drift(
-    agg,
     eps,
+    mse_loss,
     stability,
     loss_ph,
-    mseloss,
-    loss_history,
     agent_drift,
     reset_ema_op,
     sess,
@@ -65,14 +61,13 @@ def detect_drift(
       - "mseloss" [C] float
     """
 
-    msel_val    = np.asarray(agg["mseloss"], dtype=np.float32)       
-    mse_val = np.nan_to_num(mseloss, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    mse_val = np.nan_to_num(mse_loss, nan=0.0, posinf=0.0, neginf=0.0)
     unstable, stab_stats = stability.update(mse_val)
 
     loss_drift = False
     loss_c = float(mse_val)
     if np.isfinite(loss_c):
-       loss_history.append(loss_c)
        ld = bool(loss_ph.update(loss_c))
        loss_drift |= ld
 
@@ -99,6 +94,7 @@ def detect_drift(
 
 def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler):
     CURRENT_AGENT = i
+    round_idx = t
     tf.reset_default_graph()
     tf.keras.backend.set_learning_phase(1)        
 
@@ -127,37 +123,33 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
     y = tf.placeholder(shape=(None, 1), dtype=tf.float32, name="y")
     logits = agent_model(x)
 
-    loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
+    mse_loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
     if args.optimizer == 'adam':
         lr=1e-3
         optimizer = tf.train.AdamOptimizer(
-            learning_rate=lr).minimize(loss)
+            learning_rate=lr).minimize(mse_loss)
     elif args.optimizer == 'strobfl_learn':
        lr=3e-2
        alpha = 0.5
        alpha_var = tf.Variable(alpha, trainable=False, dtype=tf.float32, name="ema_alpha")
        ema_rule = gradient_update_rule_factory(alpha_var, name_prefix="grad_ema")
-       optimizer = CustomRuleSGD(learning_rate=lr, update_rule=ema_rule).minimize(loss)
+       optimizer = CustomRuleSGD(learning_rate=lr, update_rule=ema_rule).minimize(mse_loss)
     
+    lr_var = tf.Variable(LR_STABLE, trainable=False, name="lr")
+    alpha_var = tf.Variable(ALPHA_STABLE, trainable=False,  dtype=tf.float32, name="ema_alpha")
     sess.run(tf.global_variables_initializer())
     agent_model.set_weights(shared_weights)
-    # update_accum_op, read_agg, reset_accum_op = build_2step_accumulators(
-    #   logits=logits,
-    #   y_int=y,
-    #   per_example_loss=mse_loss,
-    #   scope="train_accum2"
-    #  )
-  		
-   	# print('loaded shared weights')
-    # loss_history = []
-    # loss_ph = PageHinkley(CURRENT_AGENT,delta=0.1, lambd=0.1, min_instances=15,signal_type="loss")   
-    # stability = LossStabilityTest(window=10, min_increase=0.1, std_mult=3.5)
+   
+    reset_ema_op = ema_rule.make_reset_op()
+    eps = 1e-8
 
-    # start_offset = 0
-    # agg_k=0
-    # agsteps_since_drift = 0  # Python-side counter
-    # agent_drift = []
-    # DRIFT_FLAG = False
+    loss_ph = ZPageHinkley(CURRENT_AGENT,alpha=0.02, delta_z=0.05, lambd_z=30, min_instances=30,signal_type="loss")   
+    stability = LossStabilityTest(window=10, min_increase=6.0, std_mult=12)
+
+    steps_since_drift = 0  # Python-side counter
+    agent_drift = []
+    DRIFT_FLAG = False
+    
 #---------------------------------------------training
 
 
@@ -166,34 +158,34 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
     num_steps = 0
    	
     for start in range(0,batch_size,train_size):
-        num_steps += 1
+       
         end = min(start + train_size, batch_size)
         X_batch = x_batch[start:end].astype(np.float32)
         Y_batch = y_batch[start:end]
-        _, loss_val = sess.run([optimizer, loss], feed_dict={x: X_batch, y: Y_batch})	
+        _, loss_val = sess.run([optimizer, mse_loss], feed_dict={x: X_batch, y: Y_batch})	
 
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
-        
-        # agg_k += 1
-        # if (agg_k % AGG_STEPS == 0) and (step >= WARMUP_STEPS) :
 
-        #     agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
-        #     sess.run(reset_accum_op)
-        #     if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
-                   
-        #             DRIFT_FLAG = detect_drift(agg, eps, NUM_CLASSES, MIN_LABEL_CT,stability, loss_ph_per_label,f1_ph_per_label,
-        #                                  loss_history_per_label,f1_history_per_label,agent_drift, reset_ema_op,sess, lr_var, alpha_var, CURRENT_AGENT)
-        #             if(DRIFT_FLAG==True):
-        #               agsteps_since_drift = 0
+        if(num_steps >= WARMUP_STEPS) :
 
-        #     elif (DRIFT_FLAG==True) and (agsteps_since_drift<COOLDOWN_STEPS):
-        #             agsteps_since_drift += 1
-        #             if(agsteps_since_drift==COOLDOWN_STEPS):
-        #                 sess.run(lr_var.assign(LR_STABLE))              
-        #                 sess.run(alpha_var.assign(ALPHA_STABLE))
-        #                 DRIFT_FLAG = False
-        #                 agsteps_since_drift = 0
 
+            if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (steps_since_drift>=COOLDOWN_STEPS))):
+                    
+                    DRIFT_FLAG = detect_drift(eps, loss_val,stability, loss_ph, agent_drift, 
+                                              reset_ema_op,sess, lr_var, alpha_var, CURRENT_AGENT)
+                    if(DRIFT_FLAG==True):
+                      steps_since_drift = 0
+
+            elif (DRIFT_FLAG==True) and (steps_since_drift<COOLDOWN_STEPS):
+                    steps_since_drift += 1
+
+                    if(steps_since_drift==COOLDOWN_STEPS):
+                        sess.run(lr_var.assign(LR_STABLE))              
+                        sess.run(alpha_var.assign(ALPHA_STABLE))
+                        DRIFT_FLAG = False
+                        steps_since_drift = 0
+                        
+        num_steps += 1
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights
@@ -217,10 +209,14 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
       delay = min(delay, max_delay_s)      # cap it
       time.sleep(float(delay))	
       delayedclient="true"
+    
+    client_str = "client_" + str(CURRENT_AGENT) + "_t_" + str(round_idx)
+    driftstr = "-".join(agent_drift)
+    delayedstr = delayedclient
+    results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
+    # print("Results dict:", results_dict[client_str])
+    # print("Number of results_dict items - client:", len(results_dict))
  	
-    client_str = "client_" + str(i) + "_t_" + str(t)
-
-    results_dict[client_str] = {"t": t, "i": i, "eval_success": eval_success, "eval_loss": eval_loss}  
     # print("Results dict:", results_dict[client_str])
     # print("Number of results_dict items - client:", len(results_dict))
  	

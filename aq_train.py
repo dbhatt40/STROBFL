@@ -34,6 +34,7 @@ def get_round_slice(X, y, t, T):
     n = X.shape[0]
     s = (t * n) // T
     e = ((t + 1) * n) // T
+    print(f"Getting sizes for rounds - total {n} start {s} and end {e}")
     return X[s:e], y[s:e]
 
 
