@@ -20,6 +20,7 @@ import global_vars as gv
 from .io_utils import file_write
 from collections import OrderedDict
 from .synclass1_utils import synclass1_model
+from sklearn.preprocessing import StandardScaler
 
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.99)
 
@@ -65,9 +66,9 @@ def eval_setup(global_weights):
 
     return x, y, sess, prediction, loss
 
-
-def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
+def eval_minimal(X_test, Y_test, global_weights, return_dict=None, y_scaler=None):
     args = gv.args
+    # print("[agent] y_scaler is None?", y_scaler is None)
 
     x, y, sess, prediction, loss = eval_setup(global_weights)
 
@@ -76,8 +77,8 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
     total_count = 0
     eval_loss = 0.0
 
-    # --- allocate predictions with correct shape ---
-    if args.dataset == 'air-quality':
+    # allocate predictions
+    if args.dataset == "air-quality":
         pred_np = np.zeros((num_samples, 1), dtype=np.float32)   # regression
     else:
         pred_np = np.zeros((num_samples, gv.NUM_CLASSES), dtype=np.float32)  # classification
@@ -88,88 +89,92 @@ def eval_minimal(X_test, Y_test, global_weights, return_dict=None):
 
         Xs = X_test[start:end]
         Ys = Y_test[start:end]
-        
 
-        
-        ok = np.isfinite(Xs).all(axis=1) & np.isfinite(Ys).all(axis=1)
-        # batch_size = X_test_slice.shape[0]
-        # total_count += batch_size
+        # finite mask
+        x_ok = np.isfinite(Xs).all(axis=1)
+        y_ok = np.isfinite(Ys.reshape(-1))   # works for (B,) or (B,1)
+        ok = x_ok & y_ok
+
         if not ok.any():
             continue
-        if args.dataset == 'air-quality':
-          X_feed = Xs[ok].astype(np.float32)
-          Y_feed = Ys[ok].astype(np.float32).reshape(-1, 1)
-          if X_feed.shape[0] != Y_feed.shape[0]:
-            print("MISMATCH!", start, end, "X_feed", X_feed.shape, "Y_feed", Y_feed.shape, "ok.sum", ok.sum())
-            continue
+
+        if args.dataset == "air-quality":
+            X_feed = Xs[ok].astype(np.float32)
+            Y_feed = Ys[ok].astype(np.float32).reshape(-1, 1)
         else:
-            Y_feed = Ys.astype('int64')
+            X_feed = Xs[ok].astype(np.float32)
+            Y_feed = Ys.reshape(-1)[ok].astype(np.int64)
 
         loss_val, pred_i = sess.run(
             [loss, prediction],
             feed_dict={x: X_feed, y: Y_feed}
         )
 
-       # print(f"Loss value: {loss_val} and predictions: {pred_np_i}")
         valid_bs = X_feed.shape[0]
         total_count += valid_bs
-        eval_loss += loss_val * valid_bs
-      
+        eval_loss += float(loss_val) * valid_bs
 
-        # --- store preds with correct slicing ---
-        if args.dataset == 'air-quality':
-           pred_np[start:end][ok, 0] = pred_i.reshape(-1).astype(np.float32)
+        # store preds
+        if args.dataset == "air-quality":
+            pred_np[start:end, 0][ok] = pred_i.reshape(-1).astype(np.float32)
         else:
-            pred_np[start:end, :] = pred_i
-       # print(f"Pred np : {pred_np}")
-    eval_loss = eval_loss / total_count if total_count > 0 else float('nan')
-    print("Eval loss {eval_loss} total count {total_count}")
+            pred_np[start:end, :][ok, :] = pred_i.astype(np.float32)
+
+    eval_loss = eval_loss / total_count if total_count > 0 else float("nan")
+    # print(f"Eval loss {eval_loss} total_count {total_count}")
     sess.close()
 
-    # --- compute success metric ---
-    if args.dataset == 'air-quality':
-        
-        y_true = np.asarray(Y_test, dtype=np.float32).reshape(-1)
-        pred_1d = np.asarray(pred_np, dtype=np.float32).reshape(-1)
-   # finite mask per-row for X_test (N,)
+    # ---- compute success metric ----
+    if args.dataset == "air-quality":
+        y_true_s = np.asarray(Y_test, dtype=np.float32).reshape(-1)
+        y_pred_s = np.asarray(pred_np, dtype=np.float32).reshape(-1)
+
         x_ok = np.isfinite(X_test).all(axis=1)
-        mask = x_ok & np.isfinite(y_true) & np.isfinite(pred_1d)
+        mask = x_ok & np.isfinite(y_true_s) & np.isfinite(y_pred_s)
+
         if mask.sum() == 0:
-          mse = np.nan
+            mse = float("nan")
+            sse = float("nan")
+            sst = float("nan")
+            r2  = float("nan")
         else:
-          diff = pred_1d[mask] - y_true[mask]
-          mse = float(np.mean(diff * diff))
+            if y_scaler is not None:
+                y_v = y_scaler.inverse_transform(y_true_s[mask].reshape(-1, 1)).reshape(-1)
+                p_v = y_scaler.inverse_transform(y_pred_s[mask].reshape(-1, 1)).reshape(-1)
+            else:
+                y_v = y_true_s[mask]
+                p_v = y_pred_s[mask]
 
-        print(f"MSE value {mse}")
-  
-        y_v = y_true[mask]
-        p_v = pred_1d[mask]
+            diff = p_v - y_v
+            mse = float(np.mean(diff * diff))
+            sse = float(np.sum(diff * diff))
 
-        y_mean = float(np.mean(y_v))
-        sse = float(np.sum((p_v - y_v) ** 2))
-        sst = float(np.sum((y_v - y_mean) ** 2))
-        print(f"SSE: {sse}")
+            y_mean = float(np.mean(y_v))
+            sst = float(np.sum((y_v - y_mean) ** 2))
+            r2 = 1.0 - sse / sst if sst > 0 else float("nan")
 
-        r2 = 1.0 - sse / sst if sst > 0 else float('nan')
-        eval_success = 100.0 * r2
-        # (optional) you may want to return mse too
+        # print(f"Valid eval rows: {int(mask.sum())}/{len(mask)}")
+        print(f"MSE {mse}; SSE {sse}; R2 {r2};")
+
+        eval_success = r2  # ✅ IMPORTANT
     else:
-        eval_success = 100.0 * np.mean(np.argmax(pred_1d, 1) == y_true)
+        y_true = np.asarray(Y_test, dtype=np.int64).reshape(-1)
+        pred_logits = np.asarray(pred_np, dtype=np.float32)
+        y_pred = np.argmax(pred_logits, axis=1)
+        eval_success = 100.0 * float(np.mean(y_pred == y_true))
 
     if return_dict is not None:
-        return_dict['success_thresh'] = eval_success
+        return_dict["success_thresh"] = eval_success
 
     return eval_success, eval_loss
 
 
-
-def eval_func(X_test, Y_test, t, return_dict, mal_data_X=None, mal_data_Y=None, global_weights=None):
-    args = gv.args 
+def eval_func(X_test, Y_test, t, return_dict, y_scaler=None, global_weights=None):
 
     # if global_weights is None:
     #     global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t)
 
-    eval_success, eval_loss = eval_minimal(X_test, Y_test, global_weights)
+    eval_success, eval_loss = eval_minimal(X_test, Y_test, global_weights, return_dict=None, y_scaler=y_scaler)
 
     print('*****Iteration {}: validation accuracy {}, loss {} ******'.format(t, eval_success, eval_loss))
     write_dict = OrderedDict()

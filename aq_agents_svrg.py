@@ -29,40 +29,18 @@ import global_vars as gv
 from  utils.air_quality_utils import airquality_model
 
 import time
+from utils.svrg_utils import svrg_client_learn_tf1_regression
 
-from utils.svrg_utils import svrg_client_learn_tf1
 
-
-def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def aq_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test,y_scaler):
     tf.keras.backend.set_learning_phase(1)
-	
-    tf.keras.backend.set_learning_phase(1)    
-    tf.reset_default_graph()
-    sess = tf.Session()
-
-    args = gv.init()
-    if lr is None:
-        lr = args.eta
     print('Agent %s on GPU %s' % (current_agent,gpu_id))
     # set environment
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-
-    shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-    pre_theta = None
-    
-    agent_model = airquality_model()
-    x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
-    y = tf.placeholder(shape=(None, 1), dtype=tf.float32, name="y")
-    logits = agent_model(x)
-    if pre_theta is not None:
-        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
-    else:
-        theta = shared_weights
-    agent_model.set_weights(theta)
-    
-    loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
-  		  
+	
+    args = gv.init()
+    tf.reset_default_graph()
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
         config.gpu_options.allow_growth = True
@@ -74,6 +52,20 @@ def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_te
         return
     tf.compat.v1.keras.backend.set_session(sess)
     sess.run(tf.global_variables_initializer())
+
+
+    shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
+    pre_theta = None
+    
+    agent_model = airquality_model()
+    if pre_theta is not None:
+        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
+    else:
+        theta = shared_weights
+    agent_model.set_weights(theta)
+    
+
+
 # 
     # print('loaded shared weights')
 
@@ -85,33 +77,37 @@ def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_te
     
     print("Num training steps: {}".format(num_steps))
 
-
+    data_dim = gv.DATA_DIM
+    num_classes = gv.NUM_CLASSES
     for step in range(num_steps):
-        
-        start_offset = start_offset
-        end_offset = start_offset + train_batchsize
-        X_batch = x_batch[start_offset: end_offset]
-        Y_batch = y_batch[start_offset: end_offset]
+        reset_now = (step==0)
+        start = step * train_batchsize
+        end   = min(start + train_batchsize, batch_size)
+
+        X_batch = x_batch[start:end].astype(np.float32)
+        Y_batch = y_batch[start:end].astype(np.float32).reshape(-1, 1)
 
 
-        loss, f1 = svrg_client_learn_tf1(
-               sess, agent_model, X_batch, Y_batch,
-               data_dim=gv.DATA_DIM,
-               num_classes=gv.NUM_CLASSES,
-               lr=1e-1,                  # start smaller than Adam
-               refresh_every=50,
-               mu_batch_size=256,
-               clip_norm=1.0,
-               buffer_size=2048,
-               reset_state=(step == 0),
-               return_f1=True,
-               class_weight_mode="None",
-               weight_clip=(0.5, 5.0),
-               weight_smoothing=0.7,
-            )
+        svrg_client_learn_tf1_regression(
+                sess,
+                agent_model,
+                X_batch,
+                Y_batch,
+                data_dim=gv.DATA_DIM,
+                lr=3e-3,
+                buffer_size=2048,
+                refresh_every=50,
+                mu_batch_size=256,
+                clip_norm=1.0,
+                reset_state=reset_now,
+                loss_type="mse",          # "mse" | "huber"
+                huber_delta=1.0,
+                sample_weights=None,      # None or np.ndarray shape [B] or [B,1]
+             )
 
+        if step % 50 == 0:
+                 print(f"[agent {current_agent}] step {step}/{num_steps}", flush=True)
 
-        start_offset = end_offset
         
 
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
@@ -124,7 +120,7 @@ def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_te
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape
   
-    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
+    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights, y_scaler=y_scaler)
     
     seed=None
     delayedclient = "false"

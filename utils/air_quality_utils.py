@@ -185,9 +185,9 @@ def data_air_quality(
 
 # Create mapping: station_id -> 0..K-1
     station_to_client = {sid: i for i, sid in enumerate(orig_station_ids)}
-    client_to_station = {i: sid for sid, i in station_to_client.items()}
+    # client_to_station = {i: sid for sid, i in station_to_client.items()}
 
-    print("Station → Client ID mapping:", station_to_client)
+    # print("Station → Client ID mapping:", station_to_client)
 
     label_col = "PM2.5"
     drop_cols = [timestamp_col, station_col]
@@ -238,7 +238,7 @@ def data_air_quality(
         scaled_client_xy[sid] = (X_scaler.transform(X_tr), y_scaler.transform(y_tr))
     X_Y_train_shards = {station_to_client[sid]: scaled_client_xy[sid] for sid in scaled_client_xy.keys()}
 
-    return  X_Y_train_shards, X_test_scaled, y_test_scaled
+    return  X_Y_train_shards, X_test_scaled, y_test_scaled, y_scaler
 
 
 def airquality_model():

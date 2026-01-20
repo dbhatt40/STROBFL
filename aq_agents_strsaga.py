@@ -27,52 +27,40 @@ np.random.seed(777)
 from utils.eval_utils import eval_minimal
 import global_vars as gv
 from  utils.air_quality_utils import airquality_model
-from customSGD import CustomRuleSGD, gradient_update_rule_factory
+
 import time
-from utils.strsaga_utils import strsaga_client_learn_tf1
+from utils.strsaga_utils import strsaga_client_learn_tf1_regression
 
 
-def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
-    tf.keras.backend.set_learning_phase(1)
-	
-    tf.keras.backend.set_learning_phase(1)    
+def aq_agent_strsaga(current_agent, x_batch, y_batch,  round_idx, gpu_id, return_dict, results_dict, X_test, Y_test,y_scaler):
+
     tf.reset_default_graph()
-    sess = tf.Session()
+    tf.keras.backend.set_learning_phase(1)        
 
-    args = gv.init()
-    if lr is None:
-        lr = args.eta
-    print('Agent %s on GPU %s' % (current_agent,gpu_id))
     # set environment
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-
+    
+    args = gv.init()
+    print('Agent %s on GPU %s' % (current_agent,gpu_id))
     shared_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-    pre_theta = None
-    
-    agent_model = airquality_model()
-    x = tf.placeholder(shape=(None, gv.DATA_DIM), dtype=tf.float32)
-    y = tf.placeholder(shape=(None, 1), dtype=tf.float32, name="y")
-    logits = agent_model(x)
-    if pre_theta is not None:
-        theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
-    else:
-        theta = shared_weights
-    agent_model.set_weights(theta)
-    
-    loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
-  		  
+
     if args.k > 1:
         config = tf.ConfigProto(gpu_options=gv.gpu_options)
         config.gpu_options.allow_growth = True
         #config.gpu_options.per_process_gpu_memory_fraction = 0.05
         sess = tf.Session(config=config)
-    elif args.k == 1:
-        sess = tf.Session()
     else:
-        return
+        sess = tf.Session()
+
     tf.compat.v1.keras.backend.set_session(sess)
+
+#----------build model
+    
+    agent_model = airquality_model()
+  		
     sess.run(tf.global_variables_initializer())
+    agent_model.set_weights(shared_weights)
 # 
     # print('loaded shared weights')
 
@@ -84,28 +72,31 @@ def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_te
     
     print("Num training steps: {}".format(num_steps))
 
-    data_dim = gv.DATA_DIM
-    num_classes = gv.NUM_CLASSES
+  
     for step in range(num_steps):
-        
-        start_offset = start_offset
-        end_offset = start_offset + train_batchsize
-        X_batch = x_batch[start_offset: end_offset]
-        Y_batch = y_batch[start_offset: end_offset]
+        reset_now = (step==0)
+        start = step * train_batchsize
+        end   = min(start + train_batchsize, batch_size)
+
+        X_batch = x_batch[start:end].astype(np.float32)
+        Y_batch = y_batch[start:end].astype(np.float32).reshape(-1, 1)
 
 
-        loss, f1 = strsaga_client_learn_tf1(
-               sess,
-               agent_model,
-               X_batch,
-               Y_batch,
-               data_dim=data_dim,
-               num_classes=num_classes,
-               batch_weighted=False,
+        loss_val = strsaga_client_learn_tf1_regression(
+            sess, agent_model, X_batch, Y_batch,
+            data_dim=gv.DATA_DIM,
+            lr=3e-3,
+            memory_size=2048,
+            reset_state=reset_now,
+            sample_weights=None,
+            loss_type="huber",   # or "mse"
+            huber_delta=1.0,
+            clip_norm=5.0,
             )
 
+        if step % 50 == 0:
+                 print(f"[agent {current_agent}] step {step}/{num_steps}", flush=True)
 
-        start_offset = end_offset
         
 
         # print('Agent %s, Step %s, Loss %s, Train step %s' % (i, step, loss_val, step_val))
@@ -118,7 +109,7 @@ def aq_agent_strsaga(current_agent, x_batch, y_batch, x_client_test, y_client_te
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape
   
-    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights)
+    eval_success, eval_loss = eval_minimal(X_test, Y_test, local_weights, y_scaler=y_scaler)
     
     seed=None
     delayedclient = "false"

@@ -12,6 +12,7 @@ import time
 from collections import deque
 
 import tensorflow as tf
+import math
 
 
 
@@ -803,6 +804,87 @@ class PageHinkley:
         return False
 
 
+class ZPageHinkley:
+    """
+    Scale-adaptive (z-score) Page-Hinkley drift detector (univariate).
+
+    Detects a sustained *increase* in the monitored signal.
+    To detect a decrease, call update() with -x instead of x.
+    """
+
+    def __init__(
+        self,
+        agent,
+        alpha=0.02,          # EWMA rate for mean/variance
+        delta_z=0.0,         # tolerance in z-space
+        lambd_z=10.0,        # threshold in sigma-units
+        min_instances=30,
+        signal_type="loss",
+        eps=1e-8,
+    ):
+        self.alpha = float(alpha)
+        self.delta_z = float(delta_z)
+        self.lambd_z = float(lambd_z)
+        self.min_instances = int(min_instances)
+        self.signal_type = signal_type
+        self.agent = agent
+        self.eps = eps
+
+        self.reset()
+
+    def reset(self):
+        self.t = 0
+
+        # EWMA mean and variance
+        self.mean = 0.0
+        self.var = 0.0
+
+        # PH statistics
+        self.cum_sum = 0.0
+        self.min_cum_sum = 0.0
+        self.ph_stat = 0.0
+
+        self.drift = False
+
+    def update(self, x):
+        """
+        Feed one new observation x.
+        Returns True if drift detected at this step, else False.
+        """
+        self.t += 1
+
+        # ---- EWMA mean ----
+        if self.t == 1:
+            self.mean = x
+            self.var = 0.0
+            return False
+
+        prev_mean = self.mean
+        self.mean = (1 - self.alpha) * self.mean + self.alpha * x
+
+        # ---- EWMA variance (stable form) ----
+        self.var = (1 - self.alpha) * self.var + self.alpha * (x - prev_mean) ** 2
+        std = math.sqrt(self.var) + self.eps
+
+        # ---- Z-score ----
+        z = (x - self.mean) / std
+
+        # ---- Page-Hinkley on z-score ----
+        self.cum_sum += (z - self.delta_z)
+        self.min_cum_sum = min(self.min_cum_sum, self.cum_sum)
+        self.ph_stat = self.cum_sum - self.min_cum_sum
+
+        # ---- Drift decision ----
+        if self.t > self.min_instances and self.ph_stat > self.lambd_z:
+            self.drift = True
+            return True
+
+        return False
+
+
+
+
+
 class LossStabilityTest:
     def __init__(self, window=10, min_increase=0.4, std_mult=3.0):
         self.window = int(window)
@@ -833,8 +915,71 @@ class LossStabilityTest:
         }
         return unstable, stats
     
+
+
+class RelativeLossStabilityTest:
+    """
+    Window-based stability test using *relative* mean loss increase.
+
+    Flags instability when:
+      1) Mean loss increases by more than `rel_increase` fraction, AND
+      2) Loss variance increases significantly.
+    """
+
+    def __init__(
+        self,
+        window=10,
+        rel_increase=0.4,     # 40% relative increase
+        std_mult=3.0,
+        eps=1e-8,
+        mean_floor=1e-3      # prevents explosion when early mean is tiny
+    ):
+        self.window = int(window)
+        self.rel_increase = float(rel_increase)
+        self.std_mult = float(std_mult)
+        self.eps = eps
+        self.mean_floor = mean_floor
+        self.buf = deque(maxlen=self.window)
+
+    def update(self, loss_val):
+        self.buf.append(float(loss_val))
+
+        if len(self.buf) < self.window:
+            return False, {}
+
+        arr = np.asarray(self.buf, dtype=np.float32)
+        half = self.window // 2
+
+        early = arr[:half]
+        late  = arr[half:]
+
+        early_mean = float(early.mean())
+        late_mean  = float(late.mean())
+
+        early_std  = float(early.std() + self.eps)
+        late_std   = float(late.std()  + self.eps)
+
+        # ---- Relative mean increase (percentage-style) ----
+        denom = max(abs(early_mean), self.mean_floor)
+        rel_mean_increase = (late_mean - early_mean) / denom
+
+        mean_up = rel_mean_increase > self.rel_increase
+        std_up  = late_std > self.std_mult * early_std
+
+        unstable = mean_up and std_up
+
+        stats = {
+            "early_mean": early_mean,
+            "late_mean": late_mean,
+            "relative_mean_increase": rel_mean_increase,
+            "early_std": early_std,
+            "late_std": late_std,
+        }
+
+        return unstable, stats
+
     
-    
+
 
 
 def build_2step_accumulators(logits, y_int, num_classes, per_example_loss, scope="accum2", eps=1e-9):

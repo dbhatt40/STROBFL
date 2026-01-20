@@ -27,9 +27,17 @@ from aq_agents_strsaga import aq_agent_strsaga
 
 from utils.eval_utils import eval_func
 from aq_agents import aq_agent
+from utils.synclass1_utils import aggregate_with_rbf_and_aging
+from aq_agents_svrg import aq_agent_svrg
+
+def get_round_slice(X, y, t, T):
+    n = X.shape[0]
+    s = (t * n) // T
+    e = ((t + 1) * n) // T
+    return X[s:e], y[s:e]
 
 
-def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
+def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_dict):
 	# Start the training process
 	num_agents_per_time = int(gv.C * gv.k)
 	simul_agents = gv.num_gpus * gv.max_agents_per_gpu
@@ -39,7 +47,7 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
 
 	t = 0
 	eval_loss_list = []
-	lr = 1e3
+	lr = 0.1
 	param_dict = dict()
 	param_dict['offset'] = [0]
 	param_dict['shape'] = []
@@ -75,12 +83,17 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
 				gpu_index = int(l / gv.max_agents_per_gpu)
 				gpu_id = gv.gpu_ids[gpu_index]
 				i = curr_agents[k]
-				X_batch, Y_batch = X_Y_train_shards[i]        
-				print("Size of train X_batch, Y_batch:", X_batch.shape, Y_batch.shape)
+				X_batch, Y_batch = X_Y_train_shards[i]  
+                
+				X_round, Y_round = get_round_slice(X_batch, Y_batch, t, gv.T)   
+                
+				print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
 				if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
-				  p = Process(target=aq_agent, args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
+				  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
 				elif('strsaga' in gv.optimizer):
-  				  p = Process(target=aq_agent_strsaga, args=(i, X_batch, Y_batch, train_offsets, t, gpu_id, return_dict, results_dict, X_test, Y_test, lr))
+  				  p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+				elif('svrg' in gv.optimizer):
+ 				  p = Process(target=aq_agent_svrg, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
 				p.start()
 				process_list.append(p)
 				k += 1	
@@ -99,14 +112,27 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, return_dict, results_dict):
  			print('Using standard mean aggregation')		            
  			for k in range(num_agents_per_time):
  				 global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
- 	
+		elif 'strobfl' in gv.gar:
+ 			client_num_samples = np.array(
+                    [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
+                    dtype=np.float64,
+                  )
+ 			global_weights = aggregate_with_rbf_and_aging(
+                 global_weights,
+                 num_agents_per_time,
+                 return_dict,
+                 curr_agents,
+                 client_num_samples,
+                 gamma=1.0,
+                 eps=1e-12,
+                 age_lambda=1.0)              
 		# Saving for the next update
 		np.save(gv.dir_name + 'global_weights_t%s.npy' %
 				(t + 1), global_weights)
 
 		# Evaluate global weight
 		p_eval = Process(target=eval_func, args=(
-				X_test, Y_test, t + 1, return_dict), kwargs={'global_weights': global_weights})
+				X_test, Y_test, t + 1, return_dict, y_scaler), kwargs={'global_weights': global_weights})
 		p_eval.start()
 		p_eval.join()		
 
