@@ -38,7 +38,7 @@ ALPHA_CD_DRIFT = 0
 ALPHA_UNSTABLE = ALPHA_STABLE*0.25
 
 COOLDOWN_STEPS = 2
-WARMUP_STEPS = 10
+WARMUP_STEPS = 5
 
 
 
@@ -125,7 +125,7 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
 
     mse_loss = tf.reduce_mean(tf.losses.mean_squared_error(y, logits))
     if args.optimizer == 'adam':
-        lr=1e-3
+        lr=3e-3
         optimizer = tf.train.AdamOptimizer(
             learning_rate=lr).minimize(mse_loss)
     elif args.optimizer == 'strobfl_learn':
@@ -142,9 +142,11 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
    
     reset_ema_op = ema_rule.make_reset_op()
     eps = 1e-8
+    batch_size = x_batch.shape[0]
+    train_size = args.B
 
-    loss_ph = ZPageHinkley(CURRENT_AGENT,alpha=0.02, delta_z=0.05, lambd_z=30, min_instances=30,signal_type="loss")   
-    stability = LossStabilityTest(window=10, min_increase=6.0, std_mult=12)
+    loss_ph = ZPageHinkley(CURRENT_AGENT,alpha=0.02, delta_z=0.5, lambd_z=20, min_instances=30,signal_type="loss")   
+    stability = LossStabilityTest(window=20, min_increase=10.0, std_mult=15)
 
     steps_since_drift = 0  # Python-side counter
     agent_drift = []
@@ -153,8 +155,7 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
 #---------------------------------------------training
 
 
-    batch_size = x_batch.shape[0]
-    train_size = args.B
+
     num_steps = 0
    	
     for start in range(0,batch_size,train_size):

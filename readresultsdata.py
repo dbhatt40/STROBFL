@@ -13,34 +13,12 @@ from glob import glob
 
 files = []
 
-files  += glob("./data/synthetic-class1/strobfl-strobfl/d4si4.txt")
-files  += glob("./data/synthetic-class1/adam-avg/d4si4.txt")
+files  += glob("./results/syn-s44.txt")
+files  += glob("./results/syn-a44.txt")
 
-# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4II0.4.txt")
-# files  += glob("./data/synthetic-class1/adam-avg/D4II0.4.txt")
-
-
-#files  += glob("./data/synthetic-class1/strobfl-strobfl/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/adam-avg/D0-T50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-
-#files  += glob("./data/synthetic-class1/strobfl-strobfl/D1-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/adam-avg/D1-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-
-# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/adam-avg/D4-independentT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-
-# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-# files  += glob("./data/synthetic-class1/adam-avg/D4-sharedT50K10C0.8B50LR0.1/output_global_eval_loss.txt")
-
-# files  += glob("./data/synthetic-class1/strobfl-strobfl/D4IImbalance0.6/output_global_eval_loss.txt")
-# files  += glob("./data/synthetic-class1/adam-avg/D4IImbalance0/output_global_eval_loss.txt")
+#files  += glob("./results/adam-aq.txt")
 
 
-#files  += glob("./data/synthetic-class1/strobfl-avg/d1output_global_eval_loss.txt")
-# files  += glob("./data/synthetic-class1/strobfl-avg/d4ioutput_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/strobfl-avg/d4soutput_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/strobfl-avg/d0output_global_eval_loss.txt")
-#files  += glob("./data/synthetic-class1/strobfl-strobfl/ArrivalRate2/d4ioutput_global_eval_loss.txt")
 
 
 
@@ -76,24 +54,29 @@ for f in files:
     
     
 
-#     dfs.append(df)
+    dfs.append(df)
+    
 
-# all_df = pd.concat(dfs, ignore_index=True)
-# print(all_df.head())
+means_per_df = [df["eval_success"].mean() for df in dfs]
+
+print(means_per_df)
+
+all_df = pd.concat(dfs, ignore_index=True)
+print(all_df.head())
 
 
 
-# sns.set(style="whitegrid")
+sns.set(style="whitegrid")
 
-# plt.figure(figsize=(10, 6))
-# ax = sns.lineplot(
-#     data=all_df,
-#     x="t",
-#     y="eval_success",
-#     hue="level4",      # method
-#     style="level4",    # run
-#     markers=True
-# )
+plt.figure(figsize=(10, 6))
+ax = sns.lineplot(
+    data=all_df,
+    x="t",
+    y="eval_success",
+    hue="level4",      # method
+    style="level4",    # run
+    markers=True
+)
 
 # ax.legend(
 #     title="Method",
@@ -107,14 +90,14 @@ for f in files:
 #     8, 20,
 #     alpha=0.15,
 #     color="red",
-#     label="Concept Drift"
+#     label="Drift Area 1"
 # )
 
 # ax.axvspan(
 #     30, 42,
 #     alpha=0.15,
 #     color="green",
-#     label="Covariate Shift"
+#     label="Drift Area 2"
 # )
 
 # # Avoid duplicate legend entries
@@ -128,10 +111,10 @@ for f in files:
 #     loc="upper left"
 # )
 
-# plt.xlabel("Round (t)")
-# plt.ylabel("Validation Accuracy (%)")
-# plt.title("Server Validation Accuracy across rounds- 50% shared drift & 0.4 imbalance")
-# plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
-# plt.tight_layout()
-# plt.show()
+plt.title("Global validation accuracy with training rounds", fontsize=18)
+plt.xlabel("Round (t)", fontsize=18)
+plt.ylabel("Global accuracy (%)", fontsize=16)
+plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
+plt.tight_layout()
+plt.show()
 

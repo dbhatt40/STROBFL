@@ -27,6 +27,8 @@ from synclass1_agents import synclass1_agent
 from synclass1_agents_adam import synclass1_agent_adam
 from synclass1_agents_strsaga import synclass1_agent_strsaga
 from synclass1_agents_svrg import synclass1_agent_svrg
+from synclass1_agents_fedprox import synclass1_agent_fedprox
+from synclass1_agents_fedprox import synclass1_agent_cdafed
 import time
 
 
@@ -115,7 +117,10 @@ def synclass1_train_fn(return_dict, results_dict):
                   p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('svrg' in gv.optimizer):
                   p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
-                
+                elif('fedprox' in gv.optimizer):
+                    p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                elif('cdafed' in gv.optimizer):
+                     p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 
                 p.start()
                 process_list.append(p)

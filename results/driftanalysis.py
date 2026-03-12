@@ -140,74 +140,118 @@ def plot_drift_heatmap(
     show_colorbar=True,
     xtick_every=None,
     ytick_every=None,
+    title_fontsize=16,
+    selected_agents=None,        # optional list of sampled agent IDs (length K)
+    sampled_order="sorted",      # "sorted" or "first_appearance"
+    return_mapping=False,
 ):
     """
-    Heatmap of rounds (x) vs agents (y), colored by drift type from df[drift_col].
+    Heatmap of rounds (x) vs sampled client index (y), colored by drift type.
 
-    Drift encoding (with priority if multiple appear in the string):
-      - empty/NaN -> 0 (no drift)
-      - contains 'u'  -> 1
-      - contains 'cs' -> 2
-      - contains 'cd' -> 3
-    Priority: cd > cs > u.
+    Y-axis shows indices 0..K-1 for the sampled set rather than original agent IDs.
 
-    Returns: (fig, ax, mat) where mat is a DataFrame indexed by agent, columns by round.
+    Returns:
+      (fig, ax, mat) or (fig, ax, mat, idx_to_agent) if return_mapping=True
     """
 
     def encode_drift(d):
         if pd.isna(d):
             return 0
-        s = str(d).strip()
+        s = str(d).strip().lower()
         if s == "":
             return 0
-        # priority: cd > cs > u
-        if "cd" in s:
-            return 3
-        if "cs" in s:
-            return 2
+        # priority: u > cd > cs
         if "u" in s:
+            return 3
+        if "cd" in s:
+            return 2
+        if "cs" in s:
             return 1
         return 0
+
+    sns.set(style="whitegrid")
 
     df2 = df.copy()
     df2["_drift_code"] = df2[drift_col].apply(encode_drift)
 
-    # Pivot to matrix: rows=agents, cols=rounds
-    mat = df2.pivot(index=agent_col, columns=round_col, values="_drift_code")
-    mat = mat.sort_index().sort_index(axis=1)
+    # Normalize agent ids
+    df2[agent_col] = pd.to_numeric(df2[agent_col], errors="coerce")
+    df2 = df2.dropna(subset=[agent_col])
+    df2[agent_col] = df2[agent_col].astype(int)
 
-    # If some (agent, round) combos are missing, treat as no drift
+    # Determine sampled agents
+    if selected_agents is None:
+        if sampled_order == "first_appearance":
+            seen = set()
+            selected_agents = []
+            for a in df2[agent_col].tolist():
+                if a not in seen:
+                    seen.add(a)
+                    selected_agents.append(a)
+        else:
+            selected_agents = sorted(df2[agent_col].unique().tolist())
+
+    selected_agents = [int(a) for a in selected_agents]
+    K = len(selected_agents)
+
+    # Filter to sampled agents only
+    df2 = df2[df2[agent_col].isin(selected_agents)].copy()
+
+    # Remap original agent IDs -> 0..K-1
+    agent_to_idx = {aid: i for i, aid in enumerate(selected_agents)}
+    idx_to_agent = {i: aid for aid, i in agent_to_idx.items()}
+
+    # ✅ CREATE the column (no parentheses!)
+    df2["_agent_idx"] = df2[agent_col].map(agent_to_idx)
+
+    # Pivot to matrix
+    mat = df2.pivot(index="_agent_idx", columns=round_col, values="_drift_code")
+    mat = mat.sort_index().sort_index(axis=1)
+    mat = mat.reindex(range(K))          # ensure exactly K rows
     mat = mat.fillna(0).astype(int)
 
-    # Discrete colormap: 0/1/2/3
+    # Colormap
     cmap = ListedColormap([
         "#f0f0f0",  # 0: no drift
-        "#fdae61",  # 1: u
-        "#abd9e9",  # 2: cs
-        "#d7191c",  # 3: cd
+        "#abd9e9",  # 1: CS
+        "#fdae61",  # 2: CD
+        "#d7191c",  # 3: U
     ])
-    norm = BoundaryNorm([0, 1, 2, 3, 4], cmap.N)
+    norm = BoundaryNorm([-0.5, 0.5, 1.5, 2.5, 3.5], cmap.N)
 
     # Figure sizing
     if figsize is None:
-        # reasonable default scaling with data size
         figsize = (max(8, 0.35 * mat.shape[1]), max(4, 0.35 * mat.shape[0]))
 
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(mat.values, aspect="auto", cmap=cmap, norm=norm)
 
-    ax.set_title(title)
-    ax.set_xlabel("Round")
-    ax.set_ylabel("Agent")
+    im = ax.imshow(
+        mat.values,
+        aspect="auto",
+        cmap=cmap,
+        norm=norm,
+        interpolation="nearest",
+    )
 
-    # Ticks
+    # White gridlines (Seaborn-style)
+    ax.set_facecolor("white")
+    ax.set_xticks(np.arange(-0.5, mat.shape[1], 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, mat.shape[0], 1), minor=True)
+    ax.grid(which="minor", color="white", linestyle="-", linewidth=1.2)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
+    # Labels / ticks
+    ax.set_title(title, fontsize=title_fontsize)
+    ax.set_xlabel("Round", fontsize=16)
+    ax.set_ylabel("Sampled Client Index", fontsize=16)
+
     rounds = mat.columns.tolist()
     agents = mat.index.tolist()
 
     if xtick_every is None:
-        xtick_every = max(1, len(rounds) // 20)  # ~20 labels max
+        xtick_every = max(1, len(rounds) // 20)
     if ytick_every is None:
-        ytick_every = max(1, len(agents) // 20)
+        ytick_every = 1
 
     xticks = np.arange(0, len(rounds), xtick_every)
     yticks = np.arange(0, len(agents), ytick_every)
@@ -218,11 +262,17 @@ def plot_drift_heatmap(
     ax.set_yticklabels([agents[i] for i in yticks])
 
     if show_colorbar:
-        cbar = fig.colorbar(im, ax=ax, ticks=[0.5, 1.5, 2.5, 3.5])
-        cbar.ax.set_yticklabels(["No drift", "u", "cs", "cd"])
+        cbar = fig.colorbar(im, ax=ax, ticks=[0, 1, 2, 3])
+        cbar.ax.set_yticklabels(["No drift", "CS (low)", "CD (medium)", "U (high)"])
 
     fig.tight_layout()
+
+    if return_mapping:
+        return fig, ax, mat, idx_to_agent
+
     return fig, ax, mat
+
+
 
 
 def eval_success_stats_from_txt(path):
@@ -378,7 +428,7 @@ def plot_imbalance_vs_drift_facets(
 
 
 
-file  = "results_data.csv"
+file  = "results_data1.csv"
 df = read_eval_csv(file,round_col="t",
    agent_col="i",
   success_col="eval_success",
@@ -388,12 +438,15 @@ df = read_eval_csv(file,round_col="t",
 
 group_by_round(df)
 
+
+
 plot_drift_heatmap(
     df,
     round_col="round",
     agent_col="agent",
     drift_col="drift",
     title="Drift heatmap",
+    title_fontsize=16,
     figsize=None,
     show_colorbar=True,
     xtick_every=None,
@@ -401,8 +454,8 @@ plot_drift_heatmap(
       )
 ax = plt.gca()
 
-concept_shift = (8, 20)     # e.g., concept drift window
-cov_shift     = (30, 42)    # e.g., covariate shift window
+high_drift = (8, 20)     # e.g., concept drift window
+medium_drift    = (30, 42)    # e.g., covariate shift window
 
 def add_band(ax, start, end, color, label, alpha=0.15, linestyle="--"):
     # shade (align to heatmap cell edges)
@@ -425,9 +478,17 @@ def add_band(ax, start, end, color, label, alpha=0.15, linestyle="--"):
         zorder=12
     )
 
-add_band(ax, *concept_shift, color="red",   label="Concept drift")
-add_band(ax, *cov_shift,     color="blue",  label="Covariate shift")
-
+add_band(ax, *high_drift, color="red",   label="Drift Area 1")
+add_band(ax, *medium_drift,     color="green",  label="Drift Area 2" )
+handles, labels = ax.get_legend_handles_labels()
+if labels:  # only if something has label=...
+    leg = ax.legend(handles, labels, fontsize=16)
+    for t in leg.get_texts():
+        t.set_fontsize(16)
+for txt in ax.texts:
+    if txt.get_text() in {"Drift Area 1", "Drift Area 2"}:
+        txt.set_fontsize(14)
+        txt.set_fontweight("bold")
 plt.tight_layout()
 plt.show()
 
@@ -440,6 +501,8 @@ ax.axvspan(drift_start - 0.5, drift_end + 0.5, alpha=0.15, color="red", zorder=1
 # Optional: boundary lines at start/end
 ax.axvline(drift_start - 0.5, linestyle="--", linewidth=1.5, color="red", zorder=11)
 ax.axvline(drift_end + 0.5, linestyle="--", linewidth=1.5, color="red", zorder=11)
+
+
 
 # Optional: label at top
 y_top = ax.get_ylim()[0]  # note: heatmaps often invert y
@@ -455,92 +518,8 @@ ax.text(
     zorder=12,
 )
 
+
 plt.tight_layout()
 plt.show()
 
 
-DRIFTED_CLIENTS = set(range(0, 3))
-STATIONARY_CLIENTS = set(range(4, 8))
-DRIFT_TOKENS = {"cs", "cd", "u"}
-DRIFT_EPISODES = [(8, 20), (30,42)]
-
-def detected_anywhere(series):
-    for v in series:
-        if pd.isna(v):
-            continue
-        tokens = set(str(v).lower().split("-"))
-        if tokens & DRIFT_TOKENS:
-            return True
-    return False
-
-TP = FN = FP = TN = 0
-
-# Drifted clients (episode-based)
-for cid in DRIFTED_CLIENTS:
-    for ts, te in DRIFT_EPISODES:
-        s = df[(df["agent"] == cid) & (df["round"].between(ts, te))]["drift"]
-        if detected_anywhere(s):
-            TP += 1
-        else:
-            FN += 1
-
-# Stationary clients (ever detected)
-for cid in STATIONARY_CLIENTS:
-    s = df[df["agent"] == cid]["drift"]
-    if detected_anywhere(s):
-        FP += 1
-    else:
-        TN += 1
-
-print("TP:", TP, "FN:", FN, "FP:", FP, "TN:", TN)
-
-
-plot_df = pd.DataFrame({
-    "Client Group": [
-        "Drifted (0–3)", "Drifted (0–3)",
-        "Stationary (4–8)", "Stationary (4–8)"
-    ],
-    "Outcome": ["TP", "FN", "FP", "TN"],
-    "Count": [TP, FN, FP, TN]
-})
-
-sns.set(style="whitegrid")
-
-plt.figure(figsize=(7, 5))
-ax = sns.barplot(
-    data=plot_df,
-    x="Client Group",
-    y="Count",
-    hue="Outcome",
-)
-
-# Add value labels on bars
-for container in ax.containers:
-    ax.bar_label(container, fmt="%d", padding=3)
-
-plt.title("Episodic Drift Detection Outcomes - Independent 50% drift, 0.4 Imbalance")
-plt.ylabel("Count")
-plt.xlabel("")
-plt.legend(title="Outcome", frameon=True)
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-
-
-# print(f"""
-# +----------------------------------+
-# |      Drift Detection Results     |
-# +----------------------------------+
-# | Drifted clients (0–3)            |
-# |   True Positive (TP): {TP:6d} |
-# |   False Negative (FN): {FN:6d} |
-# +----------------------------------+
-# | Stationary clients (4–8)         |
-# |   False Positive (FP): {FP:6d} |
-# |   True Negative (TN): {TN:6d} |
-# +----------------------------------+
-# """)
