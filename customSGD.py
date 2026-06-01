@@ -94,7 +94,8 @@ def gradient_update_rule_factory(alpha=0.2, name_prefix="grad_ema"):
 
     # ---- NEW: reset op for EMA slots ----
     def make_reset_op():
-        reset_ops = [m.assign(tf.zeros_like(m)) for m in slots.values()]
+        reset_ops = [m.assign(0.5 * m) for m in slots.values()]
+        # reset_ops = [m.assign(tf.zeros_like(m)) for m in slots.values()]
         if not reset_ops:
             # if called before any slot is created, just no-op
             return tf.no_op(name=f"{name_prefix}_reset_noop")

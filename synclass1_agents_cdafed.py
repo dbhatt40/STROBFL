@@ -35,9 +35,9 @@ import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
 tf.get_logger().setLevel(logging.ERROR)
-tf.set_random_seed(777)
-np.random.seed(777)
-random.seed(777)
+tf.set_random_seed(99)
+np.random.seed(99)
+random.seed(99)
 
 from utils.eval_utils import eval_minimal
 import global_vars as gv
@@ -51,12 +51,13 @@ from utils.synclass1_utils import synclass1_model
 # Tune for your stream and per-round sample counts.
 DEFAULT_LR = 0.1
 Q_MAX = 200                 # Nmax: max size of sliding confidence window Q
-DELTA_CDA = 20             # Δ: minimum sub-window size for detection
+DELTA_CDA = 40             # Δ: minimum sub-window size for detection
 LAMBDA_CDA = 0.05          # λ: sensitivity to change
 MIN_TRAIN_DATA = 40        # L: minimum amount of data before training a concept
 LOCAL_ROUNDS_PER_CHANGE = 2  # R
 LOCAL_EPOCHS_PER_ROUND = 1   # E
 NUM_CLASSES_DEFAULT = 4
+MIN_SAMPLES_BEFORE_DETECTION = 90
 
 
 # =========================================================
@@ -401,7 +402,7 @@ def synclass1_agent_cdafed(
     else:
         theta = shared_weights
 
-    agent_model.set_weights(theta)
+ 
 
     batch_size = len(x_batch)
     num_steps = int(math.ceil(float(batch_size) / float(train_batchsize)))
@@ -414,14 +415,17 @@ def synclass1_agent_cdafed(
     sample_w = tf.placeholder(tf.float32, shape=[None], name="sample_w")
     global_step = tf.Variable(0, trainable=False, name="global_step")
 
-    logits = agent_model(x, training=True)
-    probs = tf.nn.softmax(logits, axis=1)
-    max_conf = tf.reduce_max(probs, axis=1)
+    logits_train = agent_model(x, training=True)
+    logits_eval  = agent_model(x, training=False)
+
+    probs_eval = tf.nn.softmax(logits_eval, axis=1)
+    max_conf = tf.reduce_max(probs_eval, axis=1)
 
     per_example_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=y,
-        logits=logits
+      labels=y,
+      logits=logits_train
     )
+
 
     eps = 1e-8
     weighted_loss = tf.reduce_sum(sample_w * per_example_loss) / (
@@ -429,16 +433,21 @@ def synclass1_agent_cdafed(
     )
 
     # CDA-FedAvg uses plain SGD-style local updates, not EMA-reset logic. :contentReference[oaicite:6]{index=6}
-    lr_var = tf.Variable(float(lr), trainable=False, dtype=tf.float32, name="lr")
+    lr_var = tf.Variable(float(DEFAULT_LR), trainable=False, dtype=tf.float32, name="lr")
     optimizer = tf.train.GradientDescentOptimizer(learning_rate=lr_var)
     train_op = optimizer.minimize(weighted_loss, global_step=global_step)
 
     sess.run(tf.compat.v1.global_variables_initializer())
+    agent_model.set_weights(theta)
 
     # ---------------------------------------------------------
     # Persistent CDA state
     # ---------------------------------------------------------
     state = load_cda_state(CURRENT_AGENT)
+    state["Q_conf"].clear()
+    state["Q_x"].clear()
+    state["Q_y"].clear()
+
 
     print("Num training steps: {}".format(num_steps))
 
@@ -455,7 +464,8 @@ def synclass1_agent_cdafed(
         end_offset = min(start_offset + train_batchsize, batch_size)
         X_batch = np.asarray(x_batch[start_offset:end_offset], dtype=np.float32)
         Y_batch = np.asarray(y_batch[start_offset:end_offset], dtype=np.int32)
-
+        wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
+        sess.run(train_op, feed_dict={x: X_batch, y: Y_batch, sample_w: wb})
         # 1) Observe new instances and obtain confidences before any update on them
         conf_vals = sess.run(max_conf, feed_dict={x: X_batch})
 
@@ -463,6 +473,7 @@ def synclass1_agent_cdafed(
             x_i = X_batch[i]
             y_i = int(Y_batch[i])
             q_i = float(conf_vals[i])
+            
 
             # Algorithm 4: predict -> add confidence to Q -> maybe run detection
             append_q_sample(state, q_i, x_i, y_i)
@@ -473,14 +484,15 @@ def synclass1_agent_cdafed(
 
             # Run drift detection with probability exp(-2 q_i)  :contentReference[oaicite:7]{index=7}
             r = random.random()
-            if r < math.exp(-2.0 * q_i):
+            if len(state["Q_conf"]) >= MIN_SAMPLES_BEFORE_DETECTION:
+             if r < math.exp(-2.0 * q_i):
                 drift_found, k_max, sf = drift_detection(
                     state["Q_conf"],
                     lam=LAMBDA_CDA,
                     delta=DELTA_CDA
                 )
 
-                if drift_found:
+                if drift_found and not cda_drift_this_round:
                     cda_drift_this_round = True
                     state["drift_events"] += 1
 
@@ -565,13 +577,13 @@ def synclass1_agent_cdafed(
 
     seed = None
     delayedclient = "false"
-    max_delay_s = 0.1
-    rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
-    if rng.random() < 0.3:
-        delay = rng.exponential(scale=0.05)
-        delay = min(delay, max_delay_s)
-        time.sleep(float(delay))
-        delayedclient = "true"
+    # max_delay_s = 0.1
+    # rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
+    # if rng.random() < 0.3:
+    #     delay = rng.exponential(scale=0.05)
+    #     delay = min(delay, max_delay_s)
+    #     time.sleep(float(delay))
+    #     delayedclient = "true"
 
     client_str = "client_" + str(CURRENT_AGENT) + "_t_" + str(round_idx)
     driftstr = "cda_{}".format(state["drift_events"]) if state["drift_events"] > 0 else ""

@@ -28,7 +28,7 @@ from synclass1_agents_adam import synclass1_agent_adam
 from synclass1_agents_strsaga import synclass1_agent_strsaga
 from synclass1_agents_svrg import synclass1_agent_svrg
 from synclass1_agents_fedprox import synclass1_agent_fedprox
-from synclass1_agents_fedprox import synclass1_agent_cdafed
+from synclass1_agents_cdafed import synclass1_agent_cdafed
 import time
 
 
@@ -152,7 +152,7 @@ def synclass1_train_fn(return_dict, results_dict):
                  client_num_samples,
                  gamma=1.0,
                  eps=1e-12,
-                 age_lambda=1.0)              
+                 age_lambda=0.6)              
         elif 'sw-fedavg' in gv.gar:
               client_num_samples = np.array(
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],

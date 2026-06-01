@@ -13,13 +13,10 @@ from glob import glob
 
 files = []
 
-files  += glob("./results/syn-s44.txt")
-files  += glob("./results/syn-a44.txt")
 
-#files  += glob("./results/adam-aq.txt")
-
-
-
+files  += glob("./results/a-st.txt")
+files  += glob("./results/a-fp.txt")
+files  += glob("./results/a-sv.txt")
 
 
 print("Found files:")
@@ -27,8 +24,7 @@ for f in files:
     print(f)
 
 dfs = []
-methods = ['STROBFL', 'ADAM']
-#methods = ['Adam-No Drift','STROBFL-No Drift','Adam-4D/I','STROBFL-4D/I','Adam-4D/S','STROBFL-4D/S']
+methods = ['STRAP-FL','FedProx','SVRG-FedAvg']
 
 values = []
 
@@ -39,7 +35,7 @@ for f in files:
     # print(f"{f} -> min: {col.min()}, max: {col.max()}")
     # values.append(col.mean()) 
     # print(values)
-
+    df["eval_success"] *= 100
     # extract directory names for labeling
     level1 = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
     level2 = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f))))

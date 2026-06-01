@@ -29,6 +29,7 @@ from utils.eval_utils import eval_func
 from aq_agents import aq_agent
 from utils.synclass1_utils import aggregate_with_rbf_and_aging
 from aq_agents_svrg import aq_agent_svrg
+from aq_agents_fedprox import aq_agent_fedprox
 
 def get_round_slice(X, y, t, T):
     n = X.shape[0]
@@ -95,6 +96,8 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
   				  p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
 				elif('svrg' in gv.optimizer):
  				  p = Process(target=aq_agent_svrg, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+				elif('fedprox' in gv.optimizer):
+ 				  p = Process(target=aq_agent_fedprox, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))             
 				p.start()
 				process_list.append(p)
 				k += 1	

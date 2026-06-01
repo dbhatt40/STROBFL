@@ -34,20 +34,19 @@ from utils.synclass1_utils import build_2step_accumulators
 import time
 
 LR_STABLE = 0.1
-LR_CD_DRIFT = LR_STABLE*1.5
-LR_UNSTABLE = LR_STABLE*1.5
+LR_CD_DRIFT = LR_STABLE*1.05
+LR_UNSTABLE = LR_STABLE*1.1
 
 ALPHA_STABLE = 0.8
-ALPHA_CS_DRIFT = ALPHA_STABLE*0.25
-ALPHA_CD_DRIFT = 0
-ALPHA_UNSTABLE = ALPHA_STABLE*0.25
+ALPHA_CD_DRIFT = ALPHA_STABLE*0.8
+ALPHA_UNSTABLE = ALPHA_STABLE*0.6
 
-COOLDOWN_STEPS = 2
-WARMUP_STEPS = 4
+COOLDOWN_STEPS = 4
+WARMUP_STEPS = 2
 NUM_CLASSES = 4
 AGG_STEPS = 2          # 2 steps * minibatch 10 => effective metric batch 20
 MIN_LABEL_CT = 5        # require >=2 true samples of a label in the aggregated window before PH update
-
+LR_SUM=0
 
 def compute_sample_weights(y_batch, class_weight_mode="balanced"):
     B = len(y_batch)
@@ -140,21 +139,16 @@ def detect_drift(
         agent_drift.append("cd")
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
         old_lr, old_alpha = sess.run([lr_var, alpha_var])
-        sess.run(reset_ema_op)
-        sess.run(lr_var.assign(old_lr*1.5))
-        sess.run(alpha_var.assign(0))
-        drift_flag = True
-    elif loss_drift and "cs" not in agent_drift:
-        agent_drift.append("cs")
-        print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
-        old_lr, old_alpha = sess.run([lr_var, alpha_var])
-        sess.run(alpha_var.assign(old_alpha*0.8))
+        sess.run(lr_var.assign(LR_CD_DRIFT))
+        sess.run(alpha_var.assign(ALPHA_CD_DRIFT))
         drift_flag = True
     elif unstable and "u" not in agent_drift:
         agent_drift.append("u")
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
-        old_lr, old_alpha = sess.run([lr_var, alpha_var])
-        sess.run(lr_var.assign(old_lr*1.5))
+        sess.run(reset_ema_op)
+        # old_lr, old_alpha = sess.run([lr_var, alpha_var])
+        # sess.run(lr_var.assign(LR_UNSTABLE))
+        # sess.run(alpha_var.assign(ALPHA_UNSTABLE))
         drift_flag = True           
  
 
@@ -198,7 +192,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
         theta = pre_theta - gv.moving_rate * (pre_theta - shared_weights)
     else:
         theta = shared_weights
-    agent_model.set_weights(theta)
+   
     
     NUM_CLASSES = gv.NUM_CLASSES
     batch_size = len(x_batch)
@@ -259,10 +253,6 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
       per_example_loss=per_ex_loss_post,
       scope="train_accum2"
      )
-      
-    sess.run(tf.compat.v1.global_variables_initializer())
-    sess.run(reset_accum_op)
-
     
 #----------------------------------------------------------------------------------------------------
  
@@ -275,7 +265,8 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
 #-----------------------------------------------------training ----------------------
     sess.run(tf.compat.v1.global_variables_initializer())
     sess.run(reset_accum_op)
-
+    agent_model.set_weights(theta)
+    LR_SUM = 0
     for step in range(num_steps):
       if start_offset >= batch_size:
          break
@@ -291,6 +282,9 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
 
     # Step 2: post-update stats accumulation
       sess.run(update_accum_op, feed_dict={x: X_batch, y: Y_batch})
+
+      # print("******LR VAR: ", lr_value)
+      # LR_SUM += num_steps
 
     # Move to next batch  ✅
       start_offset = end_offset
@@ -324,6 +318,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     local_weights = agent_model.get_weights()
     # print("Local weights shape:", local_weights[0].shape, local_weights[0])
     local_delta = local_weights - shared_weights
+    local_delta = local_delta
 
     # eval_success, eval_loss = eval_minimal(X_test,Y_test,x, y, sess, prediction, loss)
     # print("Y test in agents:", Y_test.shape
@@ -332,13 +327,13 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     
     seed=None
     delayedclient = "false"
-    max_delay_s = 0.1 # max .1 sec delay
-    rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
-    if rng.random() < 0.3:    # delay only some clients
-      delay = rng.exponential(scale=0.05)   # mean 0.05s
-      delay = min(delay, max_delay_s)      # cap it
-      time.sleep(float(delay))	
-      delayedclient="true"
+    # max_delay_s = 0.1 # max .1 sec delay
+    # rng = np.random.default_rng(seed if seed is not None else (12345 + CURRENT_AGENT))
+    # if rng.random() < 0.3:    # delay only some clients
+    #   delay = rng.exponential(scale=0.05)   # mean 0.05s
+    #   delay = min(delay, max_delay_s)      # cap it
+    #   time.sleep(float(delay))	
+    #   delayedclient="true"
     
     client_str = "client_" + str(CURRENT_AGENT) + "_t_" + str(round_idx)
     driftstr = "-".join(agent_drift)

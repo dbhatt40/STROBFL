@@ -574,9 +574,9 @@ def aggregate_with_rbf_and_aging(
     client_dict,
     agent_list,
     client_num_samples,
-    gamma=1.0,
+    gamma=1.5,
     eps=1e-12,
-    age_lambda=1.0          # 0.0 disables aging (all ages weight = 1)
+    age_lambda=0.8          # 0.0 disables aging (all ages weight = 1)
     ):
     """
     FedAvg * RBF-similarity * Aging aggregation.
@@ -612,7 +612,7 @@ def aggregate_with_rbf_and_aging(
 
     off = sq_dists[~np.eye(num_clients, dtype=bool)]
     if off.size > 0:
-        gamma_eff = 1.0 / (np.median(off) + eps)
+        gamma_eff = 12/ (np.median(off) + eps)
     else:
         gamma_eff = gamma  # degenerate case K=1
     sim_matrix = np.exp(-gamma_eff * sq_dists)               # (K,K)

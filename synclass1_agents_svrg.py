@@ -28,8 +28,8 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 import numpy as np
-tf.set_random_seed(777)
-np.random.seed(777)
+tf.set_random_seed(99)
+np.random.seed(99)
 
 from utils.eval_utils import eval_minimal
 import global_vars as gv

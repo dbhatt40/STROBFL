@@ -29,15 +29,14 @@ from utils.synclass1_utils import build_2step_accumulators
 # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gv.mem_frac)
 
 LR_STABLE = 0.1
-LR_CD_DRIFT = LR_STABLE*1.5
-LR_UNSTABLE = LR_STABLE*1.5
+LR_CD_DRIFT = LR_STABLE*1.1
+LR_UNSTABLE = LR_STABLE*1.1
 
 ALPHA_STABLE = 0.8
-ALPHA_CS_DRIFT = ALPHA_STABLE*0.25
-ALPHA_CD_DRIFT = 0
-ALPHA_UNSTABLE = ALPHA_STABLE*0.25
+ALPHA_CD_DRIFT = ALPHA_STABLE*0.9
+ALPHA_UNSTABLE = ALPHA_STABLE*0.8
 
-COOLDOWN_STEPS = 2
+COOLDOWN_STEPS = 4
 WARMUP_STEPS = 5
 
 
@@ -80,14 +79,15 @@ def detect_drift(
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
         old_lr, old_alpha = sess.run([lr_var, alpha_var])
         sess.run(reset_ema_op)
-        sess.run(lr_var.assign(old_lr*1.5))
-        sess.run(alpha_var.assign(0))
+        # sess.run(lr_var.assign(old_lr*1.5))
+        # sess.run(alpha_var.assign(0))
         drift_flag = True
     elif unstable and "u" not in agent_drift:
         agent_drift.append("u")
         print(f"Drift {'-'.join(agent_drift)} detected in client: {CURRENT_AGENT}")
         old_lr, old_alpha = sess.run([lr_var, alpha_var])
-        sess.run(lr_var.assign(old_lr*1.5))
+        sess.run(lr_var.assign(old_lr*1.1))
+        sess.run(alpha_var.assign(old_alpha*0.8))
         drift_flag = True           
  
     return drift_flag

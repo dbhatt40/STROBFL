@@ -30,8 +30,8 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 import numpy as np
-tf.set_random_seed(777)
-np.random.seed(777)
+tf.set_random_seed(99)
+np.random.seed(99)
 
 from utils.eval_utils import eval_minimal
 import global_vars as gv
@@ -80,7 +80,7 @@ def synclass1_agent_fedprox(
     results_dict,
     X_test,
     Y_test,
-    lr=None,
+    lr=LR,
     mu=MU
 ):
     tf.keras.backend.set_learning_phase(1)
@@ -100,7 +100,9 @@ def synclass1_agent_fedprox(
     train_batchsize = gv.B
 
     if lr is None:
-        lr = args.eta if hasattr(args, "eta") else LR
+        lr=LR
+        # lr = args.eta if hasattr(args, "eta") else LR
+        
 
     print('Agent %s on GPU %s' % (CURRENT_AGENT, gpu_id))
 
@@ -122,9 +124,9 @@ def synclass1_agent_fedprox(
     else:
         theta = shared_weights
 
-    agent_model.set_weights(theta)
 
-    NUM_CLASSES_LOCAL = gv.NUM_CLASSES if hasattr(gv, "NUM_CLASSES") else NUM_CLASSES
+
+
     batch_size = len(x_batch)
     num_steps = int(math.ceil(batch_size / train_batchsize))
 
@@ -154,14 +156,22 @@ def synclass1_agent_fedprox(
     # FedProx proximal term: (mu / 2) * ||w - w_global||^2
     # Need a constant snapshot of the broadcast global weights.
     # ---------------------------------------------------------------------
-    trainable_vars = tf.trainable_variables()
+    trainable_vars = agent_model.trainable_weights
 
-    global_weight_consts = []
+
     prox_terms = []
+    if len(trainable_vars) != len(shared_weights):
+       raise ValueError("Mismatch: {} trainable vars vs {} shared weights".format(
+        len(trainable_vars), len(shared_weights)
+    ))
+    for i, (var, w0) in enumerate(zip(trainable_vars, shared_weights)):
+      if tuple(var.shape.as_list()) != np.array(w0).shape:
+        raise ValueError("Shape mismatch at {}: var {} vs weight {}".format(
+            i, var.shape.as_list(), np.array(w0).shape
+        ))
 
     for var, w0 in zip(trainable_vars, shared_weights):
         w0_const = tf.constant(w0, dtype=var.dtype.base_dtype)
-        global_weight_consts.append(w0_const)
         prox_terms.append(tf.reduce_sum(tf.square(var - w0_const)))
 
     prox_term = 0.5 * mu * tf.add_n(prox_terms)
@@ -171,6 +181,7 @@ def synclass1_agent_fedprox(
     train_op = optimizer.minimize(total_loss, global_step=global_step)
 
     sess.run(tf.compat.v1.global_variables_initializer())
+    agent_model.set_weights(theta)
 
     # ---------------------------------------------------------------------
     # Training
@@ -196,11 +207,11 @@ def synclass1_agent_fedprox(
 
         start_offset = end_offset
         
-        
+        # print("FedProx client {}, lr={}, mu={}".format(CURRENT_AGENT, lr, mu))
 
-        print("Agent {}, step {}, gs {}, data_loss {:.6f}, prox {:.6f}, total {:.6f}".format(
-            CURRENT_AGENT, step, step_val, data_loss_val, prox_val, total_loss_val
-        ))
+        # print("Agent {}, step {}, gs {}, data_loss {:.6f}, prox {:.6f}, total {:.6f}".format(
+        #     CURRENT_AGENT, step, step_val, data_loss_val, prox_val, total_loss_val
+        # ))
 
     # ---------------------------------------------------------------------
     # Final local model and delta
