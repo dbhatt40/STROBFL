@@ -29,7 +29,7 @@ from utils.eval_utils import eval_func
 from aq_agents import aq_agent
 from utils.synclass1_utils import aggregate_with_rbf_and_aging
 from aq_agents_svrg import aq_agent_svrg
-from aq_agents_fedprox import aq_agent_fedprox
+from aq_agent_fedprox import aq_agent_fedprox
 
 def get_round_slice(X, y, t, T):
     n = X.shape[0]
