@@ -113,7 +113,7 @@ def synclass1_train_fn(return_dict, results_dict):
                 gpu_id = gv.gpu_ids[gpu_index]
                 i = curr_agents[activeclient]
                 print('Client training %s agent' % i)
-                X_batch, y_batch, t_batch= client_batches[i]  
+                X_batch, y_batch, t_batch= client_batches[activeclient]  
              
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
                 if('adam' in gv.optimizer):
