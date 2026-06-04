@@ -38,7 +38,7 @@ def synclass1_train_fn(return_dict, results_dict):
     T = gv.T
     C = gv.C
     k = gv.k
-    total_clients = k*C
+    total_clients = int( k*C)
 
     num_agents_per_time = int(C*k)
     simul_agents = gv.num_gpus * gv.max_agents_per_gpu
