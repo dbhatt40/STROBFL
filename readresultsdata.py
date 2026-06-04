@@ -14,17 +14,18 @@ from glob import glob
 files = []
 
 
-files  += glob("./results/a-st.txt")
-files  += glob("./results/a-fp.txt")
-files  += glob("./results/a-sv.txt")
-
+files  += glob("./results/SS.txt")
+# files  += glob("./results/AS.txt")
+files  += glob("./results/FPS-100.txt")
+# files  += glob("./results/SA.txt")
+# files  += glob("./results/SVS.txt")
 
 print("Found files:")
 for f in files:
     print(f)
 
 dfs = []
-methods = ['STRAP-FL','FedProx','SVRG-FedAvg']
+methods = ['STRAP-FL','FedProx']
 
 values = []
 

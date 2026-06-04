@@ -267,6 +267,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     sess.run(reset_accum_op)
     agent_model.set_weights(theta)
     LR_SUM = 0
+    
     for step in range(num_steps):
       if start_offset >= batch_size:
          break
@@ -276,6 +277,8 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
       Y_batch = y_batch[start_offset:end_offset]
 
       wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
+      lr_value = sess.run(lr_var)
+      LR_SUM += float(lr_value)
 
     # Step 1: training update (pre-update loss not needed unless you want it)
       sess.run(train_op, feed_dict={x: X_batch, y: Y_batch, sample_w: wb})
@@ -347,6 +350,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_tes
     return_dict[str(CURRENT_AGENT)] = np.array(local_delta)
     return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
     return_dict[str(CURRENT_AGENT) + "_num_samples"] = batch_size
+    return_dict[str(CURRENT_AGENT) + "_lrsum"] = LR_SUM
     return_dict[str(CURRENT_AGENT) + "_time"] = time.time()
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (CURRENT_AGENT, round_idx), local_delta)

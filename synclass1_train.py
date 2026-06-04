@@ -38,6 +38,7 @@ def synclass1_train_fn(return_dict, results_dict):
     T = gv.T
     C = gv.C
     k = gv.k
+    total_clients = k*C
 
     num_agents_per_time = int(C*k)
     simul_agents = gv.num_gpus * gv.max_agents_per_gpu
@@ -61,7 +62,7 @@ def synclass1_train_fn(return_dict, results_dict):
     
     gen = federated_mixed_drift_stream_with_queues(
     num_rounds=T,
-    num_clients=k,
+    num_clients=total_clients,
     batch_size=gv.WINDOW_SIZE,
     num_drifted_clients=ndrift,
     drift_clients_mode=dmode,  # or "shared"
@@ -71,11 +72,30 @@ def synclass1_train_fn(return_dict, results_dict):
     imbalance_factor=ifactor,
     samples_per_cycle=80000,
     random_state=42,
+    queue_maxlen=2000
     )
     
 
     for round_idx, client_batches, client_test_batches, global_test_batch in gen:
         print("Round:", round_idx)
+        
+        drifted_ids = set(range(ndrift))
+        X_drift_list, y_drift_list = [], []
+        X_stat_list, y_stat_list = [], []
+
+        for cid, (Xc, yc, tc) in enumerate(client_test_batches):
+               if cid in drifted_ids:
+                 X_drift_list.append(Xc)
+                 y_drift_list.append(yc)
+        else:
+                 X_stat_list.append(Xc)
+                 y_stat_list.append(yc)
+
+        X_drift = np.concatenate(X_drift_list, axis=0)
+        y_drift = np.concatenate(y_drift_list, axis=0)
+
+        X_stat = np.concatenate(X_stat_list, axis=0)
+        y_stat = np.concatenate(y_stat_list, axis=0)
 
         X_test, y_test, t_test = global_test_batch
         # print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
@@ -93,6 +113,8 @@ def synclass1_train_fn(return_dict, results_dict):
 		
         agents_left = 1e4
         activeclient = 0
+        
+        initial_global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
         
         start = time.perf_counter()
 
@@ -137,8 +159,10 @@ def synclass1_train_fn(return_dict, results_dict):
 
         
         if 'avg' in gv.gar:
+            n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)
             for client_agents in range(num_agents_per_time):
-                global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[client_agents])]
+                p_i = return_dict[str(cid) + "_num_samples"]/n_total
+                global_weights += p_i* return_dict[str(curr_agents[client_agents])]
         elif 'strobfl' in gv.gar:
               client_num_samples = np.array(
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
@@ -167,6 +191,20 @@ def synclass1_train_fn(return_dict, results_dict):
                  gamma=1.0,
                  eps=1e-12,
                  age_lambda=1.0)
+              
+        elif 'fednova' in gv.gar:
+            update_sum = np.zeros_like(initial_global_weights)
+            n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)
+            for j in range(num_agents_per_time):
+                cid = curr_agents[j]  
+                p_i = return_dict[str(cid) + "_num_samples"]/n_total
+                client_weights = return_dict[str(cid)]        
+                delta_i = client_weights        
+                a_i = return_dict[str(cid) + "_lrsum"]    
+                normalized_update = delta_i / (a_i + 1e-12)        
+                update_sum += p_i * normalized_update
+
+            global_weights = initial_global_weights + update_sum
               
         end = time.perf_counter()
         print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")

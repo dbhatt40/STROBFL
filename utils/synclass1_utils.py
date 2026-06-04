@@ -57,14 +57,14 @@ class DriftStream4Class:
         """
         # Means
         drift_scale_mu_a = 3.0
-        drift_scale_mu_b = 2.0
-        drift_scale_mu_c = 2.5
-        drift_scale_mu_d = 3.0
+        drift_scale_mu_b = 4.0
+        drift_scale_mu_c = 4.0
+        drift_scale_mu_d = 4.0
         mu_A = np.array([0.0, 0.0])*drift_scale_mu_a
         mu_B = np.array([2.0, 0.0])*drift_scale_mu_b
         mu_C = np.array([0.0, 2.0])*drift_scale_mu_c
         mu_D = np.array([-2.0, -1.0])*drift_scale_mu_d
-
+        
         # Covariances
         cov_A = np.array([[1.0, 0.2],
                           [0.2, 1.0]])
@@ -75,10 +75,10 @@ class DriftStream4Class:
         cov_D = np.array([[1.0, 0.5],
                           [0.5, 1.5]])
         
-        W_scale_A = 1.8
-        W_scale_B = 1.8
-        W_scale_C = 1.7
-        W_scale_D = 2.3
+        W_scale_A = 1.5
+        W_scale_B = 2.5
+        W_scale_C = 0.8
+        W_scale_D = 3.0
         # Linear classifiers (W,b) for each regime
         W_A = np.array([
             [1.0,  0.6],   # class 0
@@ -169,7 +169,7 @@ class DriftStream4Class:
 
         return mu, cov, W, b
 
-    def sample_one(self):
+    def sample_one_linear(self):
         """
         Draw a single (x, y, t_global) sample from the drifting process.
         """
@@ -192,6 +192,52 @@ class DriftStream4Class:
         y = int(np.argmax(logits))
 
         return x.astype(np.float32), y, t_global
+    
+    def sample_one_nonlinear(self):
+        """
+        Draw a single (x, y, t_global) sample from the drifting process.
+               
+        """
+        
+        
+        t_global = float(self.global_step)
+        self.global_step += 1
+
+        mu, cov, W, b = self._current_params(t_global)
+
+        # Covariate drift: Gaussian parameters change over time
+        x = self.rng.multivariate_normal(mu, cov)
+        x1, x2 = x
+        # Nonlinear features
+        phi = np.array([
+          np.sin(x1),
+          np.cos(x2),
+          x1 * x2,
+          x1**2 - x2**2
+        ])
+        logits = W @ phi[:2] + b
+        # Additional nonlinear class structure
+        logits[0] += 0.8 * np.sin(x1)
+        logits[1] += 0.8 * np.cos(x2)
+        logits[2] += 0.4 * x1 * x2
+        logits[3] += 0.2 * (x1**2 - x2**2)
+        
+        # Noise
+        logits += self.rng.normal(
+            0.0,
+            self.noise_std,
+            size=4
+        )
+                
+        # Imbalance
+        logits += (
+            self.imbalance_factor
+            * self.class_prior_bias
+        )
+        y = int(np.argmax(logits))
+      
+        return x.astype(np.float32), y, t_global
+      
 
     def sample_batch(self, batch_size):
         """
@@ -203,7 +249,7 @@ class DriftStream4Class:
 
         
         for i in range(batch_size):
-            xi, yi, ti = self.sample_one()
+            xi, yi, ti = self.sample_one_nonlinear()
             X[i] = xi
             y[i] = yi
             t[i] = ti
@@ -221,7 +267,7 @@ class DriftStream4Class:
         t = np.zeros(batch_size, dtype=np.float32)
 
         for i in range(batch_size):
-            xi, yi, ti = self.sample_one()
+            xi, yi, ti = self.sample_one_nonlinear()
             X[i] = xi
             y[i] = yi
             t[i] = ti
@@ -233,7 +279,7 @@ class DriftStream4Class:
 class StationaryStream4Class:
     """
     Stationary 4-class generator:
-      - Same interface as DriftStream4Class (sample_one, sample_batch)
+      - Same interface as DriftStream4Class (sample_one_linear, sample_batch)
       - No drift: fixed Gaussian + fixed classifier (similar to regime A).
     """
 
@@ -266,7 +312,7 @@ class StationaryStream4Class:
         b = np.array([0.0, -0.5, 0.1, 0.2])
         return W, b
 
-    def sample_one(self):
+    def sample_one_linear(self):
         t_global = float(self.global_step)
         self.global_step += 1
 
@@ -286,7 +332,7 @@ class StationaryStream4Class:
         t = np.zeros(batch_size, dtype=np.float32)
 
         for i in range(batch_size):
-            xi, yi, ti = self.sample_one()
+            xi, yi, ti = self.sample_one_linear()
             X[i] = xi
             y[i] = yi
             t[i] = ti
@@ -302,7 +348,7 @@ class StationaryStream4Class:
         t = np.zeros(batch_size, dtype=np.float32)
 
         for i in range(batch_size):
-            xi, yi, ti = self.sample_one()
+            xi, yi, ti = self.sample_one_linear()
             X[i] = xi
             y[i] = yi
             t[i] = ti
@@ -394,7 +440,7 @@ def federated_mixed_drift_stream_with_queues(
 #-----------------------------
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-              shared_phase_offset = 32000  # or choose one common offset
+              shared_phase_offset = int(0.125 * samples_per_cycle)
               shared_seed = int(rng.integers(1_000_000))
               for cid in drifted_client_ids:
                     client_streams[cid] = DriftStream4Class(
@@ -405,7 +451,11 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [12000,32000,52000,72000,12000,32000,52000,72000,12000,32000]
+
+            phase_offsets = [
+                int(((i + 0.5) / num_drifted_clients) * samples_per_cycle)
+                for i in range(num_drifted_clients)
+            ]
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
