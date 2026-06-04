@@ -423,7 +423,7 @@ def federated_mixed_drift_stream_with_queues(
 
     if queue_maxlen is None:
         queue_maxlen = batch_size
-    queues = [[] for _ in range(num_clients)]
+    queues = [[] for _ in range(int(num_clients))]
 
     arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
     use_policy = arrival_rate > 1.0
