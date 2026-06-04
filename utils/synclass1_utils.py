@@ -483,7 +483,7 @@ def federated_mixed_drift_stream_with_queues(
     # --- Create analogous test streams so test has same drift/stationary structure as clients ---
     if num_drifted_clients > 0:
         if drift_clients_mode == "shared":
-              shared_phase_offset = 32000  # or choose one common offset
+              shared_phase_offset = int(0.125 * samples_per_cycle)# or choose one common offset
               shared_seed = rng.integers(1_000_000) + 999_000
               for cid in drifted_client_ids:
                     test_streams[cid] = DriftStream4Class(
@@ -494,7 +494,11 @@ def federated_mixed_drift_stream_with_queues(
                         initial_step=shared_phase_offset  # same drift schedule
                   )
         elif drift_clients_mode == "independent":
-            phase_offsets = [12000,32000,52000,72000,12000,32000,52000,72000,12000,32000]
+            phase_offsets = [
+                int(((i + 0.5) / num_drifted_clients) * samples_per_cycle)
+                for i in range(num_drifted_clients)
+            ]
+           
             counter=0
             for cid in drifted_client_ids:
                 # phase_offset = int(rng.integers(0, samples_per_cycle))
