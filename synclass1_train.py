@@ -145,6 +145,7 @@ def synclass1_train_fn(return_dict, results_dict):
         if 'avg' in gv.gar:
             n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)
             for client_agents in range(num_agents_per_time):
+                cid = curr_agents[client_agents]  
                 p_i = return_dict[str(cid) + "_num_samples"]/n_total
                 global_weights += p_i* return_dict[str(curr_agents[client_agents])]
         elif 'strobfl' in gv.gar:
