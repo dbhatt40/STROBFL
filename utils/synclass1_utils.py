@@ -566,25 +566,25 @@ def federated_mixed_drift_stream_with_queues(
         base_n = test_batch_size // num_clients
         remainder = test_batch_size % num_clients
 
-        test_batches_per_client = [None] * num_clients
-        X_test_list, y_test_list, t_test_list = [], [], []
+        # test_batches_per_client = [None] * num_clients
+        # X_test_list, y_test_list, t_test_list = [], [], []
 
-        for cid in range(num_clients):
-            stream = test_streams[cid]
-            n_c = base_n + (1 if cid < remainder else 0)
-            if n_c <= 0:
-                # keep empty batch for consistency
-                Xc = np.zeros((0, 2), dtype=np.float32)
-                yc = np.zeros((0,), dtype=np.int64)
-                tc = np.zeros((0,), dtype=np.float32)
-            else:
-                Xc, yc, tc = stream.sample_test_batch(n_c, batch_size)  # advances by batch_size
+        # for cid in range(num_clients):
+        #     stream = test_streams[cid]
+        #     n_c = base_n + (1 if cid < remainder else 0)
+        #     if n_c <= 0:
+        #         # keep empty batch for consistency
+        #         Xc = np.zeros((0, 2), dtype=np.float32)
+        #         yc = np.zeros((0,), dtype=np.int64)
+        #         tc = np.zeros((0,), dtype=np.float32)
+        #     else:
+        #         Xc, yc, tc = stream.sample_test_batch(n_c, batch_size)  # advances by batch_size
 
-            test_batches_per_client[cid] = (Xc, yc, tc)
-            if Xc.shape[0] > 0:
-             X_test_list.append(Xc)
-             y_test_list.append(yc)
-             t_test_list.append(tc)
+        #     test_batches_per_client[cid] = (Xc, yc, tc)
+        #     if Xc.shape[0] > 0:
+        #      X_test_list.append(Xc)
+        #      y_test_list.append(yc)
+        #      t_test_list.append(tc)
 
 # Global test batch = concat all per-client pieces
         X_test = np.concatenate(X_test_list, axis=0) if X_test_list else np.zeros((0,2), np.float32)
@@ -597,7 +597,7 @@ def federated_mixed_drift_stream_with_queues(
          X_test, y_test, t_test = X_test[idx], y_test[idx], t_test[idx]
 
 # Yield BOTH
-        yield r, client_batches, test_batches_per_client, (X_test, y_test, t_test)
+        yield r, client_batches, (X_test, y_test, t_test)
 
     
 

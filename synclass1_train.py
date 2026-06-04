@@ -76,7 +76,8 @@ def synclass1_train_fn(return_dict, results_dict):
     )
     
 
-    for round_idx, client_batches, client_test_batches, global_test_batch in gen:
+
+    for round_idx, client_batches, global_test_batch in gen:
         print("Round:", round_idx)
         
 
