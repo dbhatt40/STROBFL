@@ -79,23 +79,7 @@ def synclass1_train_fn(return_dict, results_dict):
     for round_idx, client_batches, client_test_batches, global_test_batch in gen:
         print("Round:", round_idx)
         
-        drifted_ids = set(range(ndrift))
-        X_drift_list, y_drift_list = [], []
-        X_stat_list, y_stat_list = [], []
 
-        for cid, (Xc, yc, tc) in enumerate(client_test_batches):
-               if cid in drifted_ids:
-                 X_drift_list.append(Xc)
-                 y_drift_list.append(yc)
-        else:
-                 X_stat_list.append(Xc)
-                 y_stat_list.append(yc)
-
-        X_drift = np.concatenate(X_drift_list, axis=0)
-        y_drift = np.concatenate(y_drift_list, axis=0)
-
-        X_stat = np.concatenate(X_stat_list, axis=0)
-        y_stat = np.concatenate(y_stat_list, axis=0)
 
         X_test, y_test, t_test = global_test_batch
         # print("  Test batch shape:", X_test.shape, y_test.shape, t_test.shape)
