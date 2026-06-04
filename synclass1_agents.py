@@ -159,7 +159,7 @@ def detect_drift(
               
 #--------------------------intialize-----------------------------------
 
-def synclass1_agent(current_agent, x_batch, y_batch, x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 
     args = gv.init()

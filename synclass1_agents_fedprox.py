@@ -72,8 +72,6 @@ def synclass1_agent_fedprox(
     current_agent,
     x_batch,
     y_batch,
-    x_client_test,
-    y_client_test,
     round_idx,
     gpu_id,
     return_dict,

@@ -114,20 +114,20 @@ def synclass1_train_fn(return_dict, results_dict):
                 i = curr_agents[activeclient]
                 print('Client training %s agent' % i)
                 X_batch, y_batch, t_batch= client_batches[i]  
-                X_tbatch, y_tbatch, t_tbatch = client_test_batches[i]
+             
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
                 if('adam' in gv.optimizer):
-                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('strobfl_learn' in gv.optimizer):
-                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('strsaga' in gv.optimizer):
-                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('svrg' in gv.optimizer):
-                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('fedprox' in gv.optimizer):
-                    p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                    p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 elif('cdafed' in gv.optimizer):
-                     p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, X_tbatch, y_tbatch,round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                     p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
                 
                 p.start()
                 process_list.append(p)

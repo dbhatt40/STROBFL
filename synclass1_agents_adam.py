@@ -36,7 +36,7 @@ import global_vars as gv
 import time
 from utils.synclass1_utils import synclass1_model
 
-def synclass1_agent_adam(current_agent, x_batch, y_batch,x_client_test, y_client_test, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent_adam(current_agent, x_batch, y_batch,round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 #--------------------------intialize-----------------------------------
     args = gv.init()

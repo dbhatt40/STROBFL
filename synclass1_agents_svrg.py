@@ -39,7 +39,7 @@ from utils.synclass1_utils import synclass1_model
 import time
 from utils.svrg_utils import svrg_client_learn_tf1
 
-def synclass1_agent_svrg(current_agent, x_batch, y_batch, x_tbatch, y_tbatch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
 
