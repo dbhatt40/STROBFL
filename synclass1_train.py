@@ -141,26 +141,45 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
         print('Joined all processes for time step %s' % round_idx)
 
         global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-
-        
         if 'avg' in gv.gar:
-               arrived_updates = [
-                          k for k, v in return_dict.items()
-                          if k.endswith("_round_arrived") and v == round_idx                          
-                         ]
-               total_samples =  0
-               agg_delta = [np.zeros_like(w) for w in global_weights]
-               for arrival_key in arrived_updates:                     
-                      prefix = arrival_key.replace("_round_arrived", "")
-                      update = return_dict[f"{prefix}_weights"]
-                      num_samples = return_dict[f"{prefix}_num_samples"]
-                      total_samples += num_samples
-                      for layer_idx in range(len(global_weights)):
-                         agg_delta[layer_idx] += num_samples * update[layer_idx]
-                      print('Avg aggregating in this round %s' % arrival_key)
-               if (total_samples>0):
-                   for layer_idx in range(len(global_weights)):
-                          global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
+            arrived_updates = [
+                 k for k, v in return_dict.items()
+                 if k.endswith("_round_arrived") and v == round_idx
+                 ]
+
+            current_updates = []
+
+            for arrival_key in arrived_updates:
+                  prefix = arrival_key.replace("_round_arrived", "")
+
+                  created_round = return_dict[f"{prefix}_round_created"]
+                  arrived_round = return_dict[f"{prefix}_round_arrived"]
+
+                  if created_round == round_idx and arrived_round == round_idx:
+                        current_updates.append(arrival_key)
+
+            total_samples = 0
+            agg_delta = [np.zeros_like(w) for w in global_weights]
+
+            for arrival_key in current_updates:
+                 prefix = arrival_key.replace("_round_arrived", "")
+
+                 update = return_dict[f"{prefix}_weights"]      # local_delta
+                 num_samples = return_dict[f"{prefix}_num_samples"]
+
+                 total_samples += num_samples
+
+                 for layer_idx in range(len(global_weights)):
+                       agg_delta[layer_idx] += num_samples * update[layer_idx]
+
+                 print(f"FedAvg no-delay aggregating {arrival_key}")
+
+            if total_samples > 0:
+               for layer_idx in range(len(global_weights)):
+                     global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
+            else:
+               print(f"No no-delay FedAvg updates at round {round_idx}")
+        
         elif 'strobfl' in gv.gar:
               global_weights= aggregate_with_rbf_and_aging(
                  round_idx,
