@@ -80,7 +80,7 @@ def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, ret
     # num_steps = int(batch_size/train_batchsize)
     num_steps = 50
     print("Num training steps: {}".format(num_steps))
-
+    LR_SUM=0
     for step in range(num_steps):
         start_offset = start_offset
         end_offset = start_offset + train_batchsize
@@ -104,6 +104,8 @@ def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, ret
                weight_clip=(0.5, 5.0),
                weight_smoothing=0.7,
             )
+     
+        LR_SUM += float(lr)
         # print("train counts:", np.bincount(y_batch.astype(int), minlength=gv.NUM_CLASSES), flush=True)
         # print("test  counts:", np.bincount(Y_test.astype(int), minlength=gv.NUM_CLASSES), flush=True)
         
@@ -139,21 +141,26 @@ def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, ret
     driftstr = ""
     delayedstr = delayedclient
     results_dict[client_str] = {"t": round_idx, "i": current_agent, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
-    # print("Results dict:", results_dict[client_str])
-    # print("Number of results_dict items - client:", len(results_dict))
+    
     delay_rng = np.random.default_rng(client_seed)
-    delay_prob = 0.25 #delay only 25% of the clients
-    max_delay = 3 # max delay is three rounds
+    delay_prob = 0.5 #delay only 25% of the clients
+    max_delay = 2 # max delay is three rounds
     delay = 0
     if delay_rng.random() < delay_prob:
-       delay = delay_rng.integers(1, max_delay + 1)
- 	
+      delay = delay_rng.integers(1, max_delay + 1)
+
+
     print('Agent {}: success {}, loss {}'.format(current_agent, eval_success, eval_loss))#  
-    return_dict[str(current_agent)] = np.array(local_delta)
+    return_dict[f"{current_agent}_r{round_idx}_weights"] = np.array(local_delta)
     return_dict["theta{}".format(current_agent)] = np.array(local_weights)
-    return_dict[str(current_agent) + "_num_samples"] = batch_size
-    return_dict[str(current_agent) + "_round_created"] = round_idx
-    return_dict[str(current_agent) + "_delay"] = delay
+    return_dict[f"{current_agent}_r{round_idx}_num_samples"] = batch_size
+    return_dict[str(current_agent) + "_lrsum"] = LR_SUM
+    return_dict[f"{current_agent}_r{round_idx}_round_created"] = round_idx
+    return_dict[f"{current_agent}_r{round_idx}_round_arrived"] = round_idx + delay
+    print(
+      f"Added a delay for {current_agent} at round {round_idx} "
+      f"to round_arrived {round_idx + delay}, delay={delay}"
+    )
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (current_agent, round_idx), local_delta)
 
