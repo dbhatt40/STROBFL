@@ -126,9 +126,9 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                   p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
                 elif('fedprox' in gv.optimizer):
                     p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
-                # elif('cdafed' in gv.optimizer):
-                #      p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
-                
+                elif('cdafed' in gv.optimizer):
+                    p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
+
                 p.start()
                 process_list.append(p)
                 activeclient += 1	
@@ -149,15 +149,18 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                           if k.endswith("_round_arrived") and v == round_idx                          
                          ]
                total_samples =  0
+               agg_delta = [np.zeros_like(w) for w in global_weights]
                for arrival_key in arrived_updates:                     
                       prefix = arrival_key.replace("_round_arrived", "")
                       update = return_dict[f"{prefix}_weights"]
                       num_samples = return_dict[f"{prefix}_num_samples"]
                       total_samples += num_samples
-                      global_weights += num_samples*update
+                      for layer_idx in range(len(global_weights)):
+                         agg_delta[layer_idx] += num_samples * update[layer_idx]
                       print('Avg aggregating in this round %s' % arrival_key)
                if (total_samples>0):
-                   global_weights /= total_samples
+                   for layer_idx in range(len(global_weights)):
+                          global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
         elif 'strobfl' in gv.gar:
               global_weights= aggregate_with_rbf_and_aging(
                  round_idx,

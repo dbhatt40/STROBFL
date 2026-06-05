@@ -362,7 +362,9 @@ def synclass1_agent_cdafed(
     client_seed,
     lr=None
 ):
+    
     tf.keras.backend.set_learning_phase(1)
+    print("Here in CDAFED")
 
     args = gv.init()
     if args.k > 1:
