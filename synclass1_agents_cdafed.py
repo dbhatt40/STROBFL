@@ -359,6 +359,7 @@ def synclass1_agent_cdafed(
     results_dict,
     X_test,
     Y_test,
+    client_seed,
     lr=None
 ):
     tf.keras.backend.set_learning_phase(1)

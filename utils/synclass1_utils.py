@@ -623,6 +623,7 @@ def _flatten_weights(weights_list):
 
 
 def aggregate_with_rbf_and_aging(
+    round_idx,
     global_weights,
     num_clients,
     client_dict,
@@ -630,7 +631,7 @@ def aggregate_with_rbf_and_aging(
     client_num_samples,
     gamma=1.5,
     eps=1e-12,
-    age_lambda=0.8          # 0.0 disables aging (all ages weight = 1)
+    age_lambda=0.05          # 0.0 disables aging (all ages weight = 1)
     ):
     """
     FedAvg * RBF-similarity * Aging aggregation.
@@ -638,9 +639,7 @@ def aggregate_with_rbf_and_aging(
     Aging factor uses: age_score = exp(-age_lambda * age)
     where age = current_time - timeofupdate.
     """
-    current_time=None
-    if current_time is None:
-        current_time = time.time()  # seconds since epoch by default
+
 
     if num_clients == 0:
         return [w.copy() for w in global_weights]
@@ -651,9 +650,9 @@ def aggregate_with_rbf_and_aging(
 
     for k in range(num_clients):
         entry = client_dict[str(agent_list[k])]
-        t_u = client_dict[str(agent_list[k]) + "_time"]
+        # t_u = client_dict[str(agent_list[k]) + "_time"]
         client_updates.append(entry)
-        client_times.append(t_u)
+        # client_times.append(t_u)
 
     # ----- 2) Flatten updates for similarity computation -----
     flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
@@ -666,7 +665,7 @@ def aggregate_with_rbf_and_aging(
 
     off = sq_dists[~np.eye(num_clients, dtype=bool)]
     if off.size > 0:
-        gamma_eff = 12/ (np.median(off) + eps)
+        gamma_eff = 1/ (np.median(off) + eps)
     else:
         gamma_eff = gamma  # degenerate case K=1
     sim_matrix = np.exp(-gamma_eff * sq_dists)               # (K,K)
@@ -689,12 +688,15 @@ def aggregate_with_rbf_and_aging(
 
     if age_lambda and age_lambda > 0.0:
         for k in range(num_clients):
-            t_u = client_times[k]
+            entry = client_dict[str(agent_list[k])]
+            created_round = client_dict[str(agent_list[k]) + "_created_round"]
+            delay = client_dict[str(agent_list[k]) + "_delay"]
+            # t_u = client_times[k]
+            t_u = round_idx - (created_round+delay)
             if t_u is None:
-                # If no timestamp, treat as "fresh" (age=0) OR you can treat as old.
                 age = 0.0
             else:
-                age = float(current_time) - float(t_u)
+                age = int(t_u)
             # decay: newer => larger weight
             age_scores[k] = np.exp(-age_lambda * max(age, 0.0))
 

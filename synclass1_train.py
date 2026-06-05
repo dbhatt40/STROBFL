@@ -32,7 +32,7 @@ from synclass1_agents_cdafed import synclass1_agent_cdafed
 import time
 
 
-def synclass1_train_fn(return_dict, results_dict):
+def synclass1_train_fn(return_dict, results_dict, master_rng):
 	# Start the training process
 
     T = gv.T
@@ -100,7 +100,7 @@ def synclass1_train_fn(return_dict, results_dict):
         activeclient = 0
         
         initial_global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
-        
+        client_seed = int(master_rng.integers(1_000_000_000))
         start = time.perf_counter()
 
     # after this many steps without drift -> go back to stable
@@ -114,20 +114,20 @@ def synclass1_train_fn(return_dict, results_dict):
                 i = curr_agents[activeclient]
                 print('Client training %s agent' % i)
                 X_batch, y_batch, t_batch= client_batches[activeclient]  
-             
+               
                 print("Size of train X_batch, Y_batch:", X_batch.shape, y_batch.shape)
                 if('adam' in gv.optimizer):
-                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_adam, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
                 elif('strobfl_learn' in gv.optimizer):
-                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
-                elif('strsaga' in gv.optimizer):
-                  p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test,client_seed, lr))
+                # elif('strsaga' in gv.optimizer):
+                #   p = Process(target=synclass1_agent_strsaga, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
                 elif('svrg' in gv.optimizer):
-                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                  p = Process(target=synclass1_agent_svrg, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
                 elif('fedprox' in gv.optimizer):
-                    p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
-                elif('cdafed' in gv.optimizer):
-                     p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, lr))
+                    p = Process(target=synclass1_agent_fedprox, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
+                # elif('cdafed' in gv.optimizer):
+                #      p = Process(target=synclass1_agent_cdafed, args=(i, X_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, y_test, client_seed, lr))
                 
                 p.start()
                 process_list.append(p)
@@ -144,25 +144,34 @@ def synclass1_train_fn(return_dict, results_dict):
 
         
         if 'avg' in gv.gar:
-            n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)
-            for client_agents in range(num_agents_per_time):
-                cid = curr_agents[client_agents]  
-                p_i = return_dict[str(cid) + "_num_samples"]/n_total
-                global_weights += p_i* return_dict[str(curr_agents[client_agents])]
+               arrived_updates = [
+                          k for k, v in return_dict.items()
+                          if k.endswith("_round_arrived") and v == round_idx
+                         ]
+               total_samples =  0
+               for arrival_key in arrived_updates:
+                      prefix = arrival_key.replace("_round_arrived", "")
+                      update = return_dict[f"{prefix}_weights"]
+                      num_samples = return_dict[f"{prefix}_num_samples"]
+                      total_samples += num_samples
+                      global_weights += num_samples*update
+               if (total_samples>0):
+                   global_weights /= total_samples
         elif 'strobfl' in gv.gar:
               client_num_samples = np.array(
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
                     dtype=np.float64,
                   )
               global_weights= aggregate_with_rbf_and_aging(
+                 round_idx,
                  global_weights,
                  num_agents_per_time,
-                 return_dict,
+                 return_dict,                 
                  curr_agents,
                  client_num_samples,
                  gamma=1.0,
                  eps=1e-12,
-                 age_lambda=0.6)              
+                 age_lambda=0.05)              
         elif 'sw-fedavg' in gv.gar:
               client_num_samples = np.array(
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],

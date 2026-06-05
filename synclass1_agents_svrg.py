@@ -39,7 +39,7 @@ from utils.synclass1_utils import synclass1_model
 import time
 from utils.svrg_utils import svrg_client_learn_tf1
 
-def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, lr=None):
+def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, client_seed, lr=None):
     tf.keras.backend.set_learning_phase(1)
 	
 
@@ -141,13 +141,19 @@ def synclass1_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, ret
     results_dict[client_str] = {"t": round_idx, "i": current_agent, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
     # print("Results dict:", results_dict[client_str])
     # print("Number of results_dict items - client:", len(results_dict))
- 	
+    delay_rng = np.random.default_rng(client_seed)
+    delay_prob = 0.25 #delay only 25% of the clients
+    max_delay = 3 # max delay is three rounds
+    delay = 0
+    if delay_rng.random() < delay_prob:
+       delay = delay_rng.integers(1, max_delay + 1)
  	
     print('Agent {}: success {}, loss {}'.format(current_agent, eval_success, eval_loss))#  
     return_dict[str(current_agent)] = np.array(local_delta)
     return_dict["theta{}".format(current_agent)] = np.array(local_weights)
     return_dict[str(current_agent) + "_num_samples"] = batch_size
-    return_dict[str(current_agent) + "_time"] = time.time()
+    return_dict[str(current_agent) + "_round_created"] = round_idx
+    return_dict[str(current_agent) + "_delay"] = delay
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (current_agent, round_idx), local_delta)
 

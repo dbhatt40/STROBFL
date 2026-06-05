@@ -78,6 +78,7 @@ def synclass1_agent_fedprox(
     results_dict,
     X_test,
     Y_test,
+    client_seed,
     lr=LR,
     mu=MU
 ):
@@ -186,7 +187,7 @@ def synclass1_agent_fedprox(
     # ---------------------------------------------------------------------
     print("Num training steps: {}".format(num_steps))
     start_offset = 0
-
+    LR_SUM = 0
     for step in range(num_steps):
         if start_offset >= batch_size:
             break
@@ -197,11 +198,13 @@ def synclass1_agent_fedprox(
         Y_batch = y_batch[start_offset:end_offset]
 
         wb = compute_sample_weights(Y_batch, class_weight_mode="balanced")
-
+        
         _, data_loss_val, prox_val, total_loss_val, step_val = sess.run(
             [train_op, weighted_data_loss, prox_term, total_loss, global_step],
             feed_dict={x: X_batch, y: Y_batch, sample_w: wb}
         )
+        lr_value = sess.run(lr_var)
+        LR_SUM += float(lr_value)
 
         start_offset = end_offset
         
@@ -240,11 +243,22 @@ def synclass1_agent_fedprox(
     }
 
     print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))
+    
+    delay_rng = np.random.default_rng(client_seed)
+    delay_prob = 0.25 #delay only 25% of the clients
+    max_delay = 2 # max delay is three rounds
+    delay = 0
+    if delay_rng.random() < delay_prob:
+      delay = delay_rng.integers(0, max_delay + 1)
 
-    return_dict[str(CURRENT_AGENT)] = np.array(local_delta)
+
+    print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))#  
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_weights"] = np.array(local_delta)
     return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
-    return_dict[str(CURRENT_AGENT) + "_num_samples"] = batch_size
-    return_dict[str(CURRENT_AGENT) + "_time"] = time.time()
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_num_samples"] = batch_size
+    return_dict[str(CURRENT_AGENT) + "_lrsum"] = LR_SUM
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_created"] = round_idx
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_arrived"] = round_idx + delay
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (CURRENT_AGENT, round_idx), local_delta)
 

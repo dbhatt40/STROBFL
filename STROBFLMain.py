@@ -140,10 +140,10 @@ def main(args):
             return_dict['eval_success'] = 0.0
             return_dict['eval_loss'] = 0.0    		
             results_dict = manager.dict()
-
-
+    random_state = 100
+    master_rng = np.random.default_rng(random_state)
     if(args.dataset == 'synthetic-class1'):
-            _ = synclass1_train_fn(return_dict, results_dict)
+            _ = synclass1_train_fn(return_dict, results_dict, master_rng)
     elif (args.dataset == 'air-quality'):
             X_Y_train_shards, X_test, Y_test, y_scaler = data_air_quality()
             _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, y_scaler, return_dict, results_dict)
