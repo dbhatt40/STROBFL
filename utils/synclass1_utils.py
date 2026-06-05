@@ -626,12 +626,11 @@ def aggregate_with_rbf_and_aging(
     round_idx,
     global_weights,
     num_clients,
-    client_dict,
+    return_dict,
     agent_list,
-    client_num_samples,
     gamma=1.5,
     eps=1e-12,
-    age_lambda=0.05          # 0.0 disables aging (all ages weight = 1)
+    age_lambda=0.2          # 0.0 disables aging (all ages weight = 1)
     ):
     """
     FedAvg * RBF-similarity * Aging aggregation.
@@ -641,20 +640,37 @@ def aggregate_with_rbf_and_aging(
     """
 
 
-    if num_clients == 0:
+    if num_clients == 0:    
         return [w.copy() for w in global_weights]
 
-    # ----- 1) Collect client updates + timestamps -----
     client_updates = []
-    client_times = []
+    client_samples = []
+    client_ages=[]
+    
+    arrived_updates = [
+               k for k, v in return_dict.items()
+               if k.endswith("_round_arrived") and v == round_idx                          
+              ]
 
-    for k in range(num_clients):
-        entry = client_dict[str(agent_list[k])]
-        # t_u = client_dict[str(agent_list[k]) + "_time"]
-        client_updates.append(entry)
-        # client_times.append(t_u)
+    for arrival_key in arrived_updates:                     
+           prefix = arrival_key.replace("_round_arrived", "")           
+           update = return_dict[f"{prefix}_weights"]
+           client_updates.append(update)
+           
+           num_samples = return_dict[f"{prefix}_num_samples"]
+           client_samples.append(num_samples)
+           
+           parts = arrival_key.split("_")
+           original_round = int(parts[1][1:])  # remove the 'r'
+           client_age = return_dict[f"{prefix}_round_arrived"]-original_round
+           client_ages.append(client_age)
+           
+           print(f'RBF aggregating in this round {arrival_key}, samples {num_samples}, age{client_age}')
 
     # ----- 2) Flatten updates for similarity computation -----
+    if len(client_updates) == 0:
+     return [w.copy() for w in global_weights]
+ 
     flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
 
     # ----- 3) RBF similarity matrix between client updates -----
@@ -663,49 +679,47 @@ def aggregate_with_rbf_and_aging(
     sq_dists = sq_norms + sq_norms.T - 2.0 * (X @ X.T)       # (K,K)
     sq_dists = np.maximum(sq_dists, 0.0)
 
-    off = sq_dists[~np.eye(num_clients, dtype=bool)]
+    off = sq_dists[~np.eye(len(client_updates), dtype=bool)]
     if off.size > 0:
         gamma_eff = 1/ (np.median(off) + eps)
     else:
         gamma_eff = gamma  # degenerate case K=1
-    sim_matrix = np.exp(-gamma_eff * sq_dists)               # (K,K)
+    sim_matrix = np.exp(-gamma_eff * sq_dists)   
 
-    np.fill_diagonal(sim_matrix, 0.0)
-    sim_scores = sim_matrix.sum(axis=1)                      # (K,)
-    sim_scores = np.maximum(sim_scores, eps)
-    sim_scores = sim_scores / (sim_scores.sum() + eps)
+    K = len(client_updates)
+    if(K==1):
+     sim_scores = np.ones(1,dtype=float)
+    else:
+     sim_matrix = np.exp(-gamma_eff*sq_dists)            # (K,K)
+
+     np.fill_diagonal(sim_matrix, 0.0)
+     sim_scores = sim_matrix.sum(axis=1)                      # (K,)
+     sim_scores = np.maximum(sim_scores, eps)
+ #   sim_scores = sim_scores / (sim_scores.sum() + eps)
 
     # ----- 4) FedAvg-style sample weights -----
-    sample_w = np.asarray(client_num_samples, dtype=float)
+    sample_w = np.asarray(client_samples, dtype=float)
     sample_w = np.maximum(sample_w, 0.0)
     if sample_w.sum() <= 0:
         sample_w = np.ones_like(sample_w)
-    sample_w = sample_w / (sample_w.sum() + eps)
+    sample_w = np.maximum(sample_w, eps)
+  #  sample_w = sample_w / (sample_w.sum() + eps)
 
     # ----- 5) Aging weights -----
     # If age_lambda == 0 => all ones (no aging).
-    age_scores = np.ones(num_clients, dtype=float)
+    age_scores = np.ones(len(client_ages), dtype=float)
 
     if age_lambda and age_lambda > 0.0:
-        for k in range(num_clients):
-            entry = client_dict[str(agent_list[k])]
-            created_round = client_dict[str(agent_list[k]) + "_created_round"]
-            delay = client_dict[str(agent_list[k]) + "_delay"]
-            # t_u = client_times[k]
-            t_u = round_idx - (created_round+delay)
-            if t_u is None:
+        for k in range(len(client_ages)):
+            age = client_ages[k]
+    
+            if age is None:
                 age = 0.0
-            else:
-                age = int(t_u)
-            # decay: newer => larger weight
-            age_scores[k] = np.exp(-age_lambda * max(age, 0.0))
-
-        age_scores = np.maximum(age_scores, eps)
-        age_scores = age_scores / (age_scores.sum() + eps)
-    else:
-        # normalized ones (optional)
-        age_scores = age_scores / (age_scores.sum() + eps)
-
+    
+            age_scores[k] = np.exp(-age_lambda * max(float(age), 0.0))
+    age_scores = np.maximum(age_scores, eps)
+   # age_scores = age_scores / (age_scores.sum() + eps)
+  
     # ----- 6) Combine all three multiplicatively + renormalize -----
     combined_w = sample_w * sim_scores * age_scores
     combined_w = np.maximum(combined_w, eps)
@@ -714,11 +728,14 @@ def aggregate_with_rbf_and_aging(
 
     # ----- 7) Apply weighted average of updates to global weights -----
     new_global_weights = []
+
     for layer_idx in range(len(global_weights)):
-        agg_update_layer = sum(
-            combined_w[k] * client_updates[k][layer_idx] for k in range(num_clients)
-        )
-        new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
+       agg_update_layer = np.zeros_like(global_weights[layer_idx])
+
+       for k in range(len(client_updates)):
+          agg_update_layer += combined_w[k] * client_updates[k][layer_idx]
+  
+       new_global_weights.append(global_weights[layer_idx] + agg_update_layer)
 
     return new_global_weights
 

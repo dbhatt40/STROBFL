@@ -159,20 +159,15 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                if (total_samples>0):
                    global_weights /= total_samples
         elif 'strobfl' in gv.gar:
-              client_num_samples = np.array(
-                    [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
-                    dtype=np.float64,
-                  )
               global_weights= aggregate_with_rbf_and_aging(
                  round_idx,
                  global_weights,
                  num_agents_per_time,
                  return_dict,                 
                  curr_agents,
-                 client_num_samples,
                  gamma=1.0,
                  eps=1e-12,
-                 age_lambda=0.05)              
+                 age_lambda=0.2)              
         elif 'sw-fedavg' in gv.gar:
               client_num_samples = np.array(
                     [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
