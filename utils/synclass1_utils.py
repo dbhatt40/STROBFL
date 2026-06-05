@@ -671,6 +671,18 @@ def aggregate_with_rbf_and_aging(
     if len(client_updates) == 0:
      return [w.copy() for w in global_weights]
  
+    for k, update in enumerate(client_updates):
+       flat = _flatten_weights(update)
+       print(
+          f"Client {k}: "
+          f"shape={flat.shape}, "
+          f"norm={np.linalg.norm(flat):.6f}, "
+          f"mean={flat.mean():.6f}, "
+          f"std={flat.std():.6f}, "
+          f"min={flat.min():.6f}, "
+          f"max={flat.max():.6f}"
+      )
+ 
     flat_updates = np.stack([_flatten_weights(u) for u in client_updates], axis=0)  # (K, D)
 
     # ----- 3) RBF similarity matrix between client updates -----
@@ -679,23 +691,29 @@ def aggregate_with_rbf_and_aging(
     sq_dists = sq_norms + sq_norms.T - 2.0 * (X @ X.T)       # (K,K)
     sq_dists = np.maximum(sq_dists, 0.0)
 
-    off = sq_dists[~np.eye(len(client_updates), dtype=bool)]
-    if off.size > 0:
-        gamma_eff = 1/ (np.median(off) + eps)
+    K = len(client_updates)
+    if(K==1):
+        sim_scores = np.ones(1,dtype=float)
     else:
-        gamma_eff = gamma  # degenerate case K=1
+        off = sq_dists[~np.eye(K, dtype=bool)]
+        med = np.median(off)
+        if med <= eps:
+          gamma_eff = gamma 
+        else:
+          gamma_eff = 1/ med
+
+         # degenerate case K=1
     sim_matrix = np.exp(-gamma_eff * sq_dists)   
 
     K = len(client_updates)
     if(K==1):
-     sim_scores = np.ones(1,dtype=float)
+       sim_scores = np.ones(1,dtype=float)
     else:
-     sim_matrix = np.exp(-gamma_eff*sq_dists)            # (K,K)
-
-     np.fill_diagonal(sim_matrix, 0.0)
-     sim_scores = sim_matrix.sum(axis=1)                      # (K,)
-     sim_scores = np.maximum(sim_scores, eps)
- #   sim_scores = sim_scores / (sim_scores.sum() + eps)
+       sim_matrix = np.exp(-gamma_eff*sq_dists)           
+       np.fill_diagonal(sim_matrix, 0.0)
+       sim_scores = sim_matrix.sum(axis=1)                    
+       sim_scores = np.maximum(sim_scores, eps)
+  
 
     # ----- 4) FedAvg-style sample weights -----
     sample_w = np.asarray(client_samples, dtype=float)
@@ -703,12 +721,9 @@ def aggregate_with_rbf_and_aging(
     if sample_w.sum() <= 0:
         sample_w = np.ones_like(sample_w)
     sample_w = np.maximum(sample_w, eps)
-  #  sample_w = sample_w / (sample_w.sum() + eps)
+    
 
-    # ----- 5) Aging weights -----
-    # If age_lambda == 0 => all ones (no aging).
     age_scores = np.ones(len(client_ages), dtype=float)
-
     if age_lambda and age_lambda > 0.0:
         for k in range(len(client_ages)):
             age = client_ages[k]
@@ -718,13 +733,13 @@ def aggregate_with_rbf_and_aging(
     
             age_scores[k] = np.exp(-age_lambda * max(float(age), 0.0))
     age_scores = np.maximum(age_scores, eps)
-   # age_scores = age_scores / (age_scores.sum() + eps)
+
   
     # ----- 6) Combine all three multiplicatively + renormalize -----
     combined_w = sample_w * sim_scores * age_scores
     combined_w = np.maximum(combined_w, eps)
     combined_w = combined_w / (combined_w.sum() + eps)
-    print("combined weights with rbf and aging:", combined_w)
+    print("combined weights with samples, rbf and aging:", combined_w)
 
     # ----- 7) Apply weighted average of updates to global weights -----
     new_global_weights = []
