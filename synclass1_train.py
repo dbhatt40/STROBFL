@@ -146,15 +146,16 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
         if 'avg' in gv.gar:
                arrived_updates = [
                           k for k, v in return_dict.items()
-                          if k.endswith("_round_arrived") and v == round_idx
+                          if k.endswith("_round_arrived") and v == round_idx                          
                          ]
                total_samples =  0
-               for arrival_key in arrived_updates:
+               for arrival_key in arrived_updates:                     
                       prefix = arrival_key.replace("_round_arrived", "")
                       update = return_dict[f"{prefix}_weights"]
                       num_samples = return_dict[f"{prefix}_num_samples"]
                       total_samples += num_samples
                       global_weights += num_samples*update
+                      print('Avg aggregating in this round %s' % arrival_key)
                if (total_samples>0):
                    global_weights /= total_samples
         elif 'strobfl' in gv.gar:
