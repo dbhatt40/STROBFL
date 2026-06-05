@@ -344,11 +344,11 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
 
     delay_rng = np.random.default_rng(client_seed)
-    delay_prob = 0.25 #delay only 25% of the clients
+    delay_prob = 0.5 #delay only 25% of the clients
     max_delay = 2 # max delay is three rounds
     delay = 0
     if delay_rng.random() < delay_prob:
-      delay = delay_rng.integers(0, max_delay + 1)
+      delay = delay_rng.integers(1, max_delay + 1)
 
  	
     print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))#  
@@ -358,6 +358,10 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     return_dict[str(CURRENT_AGENT) + "_lrsum"] = LR_SUM
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_created"] = round_idx
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_arrived"] = round_idx + delay
+    print(
+      f"Added a delay for {CURRENT_AGENT} at round {round_idx} "
+      f"to round_arrived {round_idx + delay}, delay={delay}"
+    )
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (CURRENT_AGENT, round_idx), local_delta)
 
