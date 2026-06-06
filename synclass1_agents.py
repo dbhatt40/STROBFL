@@ -36,23 +36,16 @@ import time
 LR_STABLE = 0.1
 # LR_CD_DRIFT = LR_STABLE*1.05
 # LR_UNSTABLE = LR_STABLE*1.1
-LR_CD_DRIFT = LR_STABLE*1.1
-LR_UNSTABLE = LR_STABLE*1.2
+LR_CD_DRIFT = LR_STABLE
+LR_UNSTABLE = LR_STABLE*0.6
 
-# ALPHA_STABLE = 0.8
+ALPHA_STABLE = 0.9
 # ALPHA_CD_DRIFT = ALPHA_STABLE*0.8
 # ALPHA_UNSTABLE = ALPHA_STABLE*0.6
-
-ALPHA_STABLE = 0.85
 ALPHA_CD_DRIFT = ALPHA_STABLE*0.9
 ALPHA_UNSTABLE = ALPHA_STABLE*0.8
 
-
-# =============================================================================
 # COOLDOWN_STEPS = 4
-# WARMUP_STEPS = 2
-# =============================================================================
-
 COOLDOWN_STEPS = 6
 WARMUP_STEPS = 2
 
