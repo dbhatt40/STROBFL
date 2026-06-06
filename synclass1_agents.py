@@ -344,7 +344,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
 
     delay_rng = np.random.default_rng(client_seed)
-    delay_prob = 0.5 #delay only 25% of the clients
+    delay_prob = 0.3 #delay only 25% of the clients
     max_delay = 2 # max delay is three rounds
     delay = 0
     if delay_rng.random() < delay_prob:

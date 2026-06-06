@@ -673,6 +673,7 @@ def aggregate_with_rbf_and_aging(
  
     for k, update in enumerate(client_updates):
        flat = _flatten_weights(update)
+       flat = flat / (np.linalg.norm(flat) + 1e-12)
        print(
           f"Client {k}: "
           f"shape={flat.shape}, "
