@@ -735,7 +735,7 @@ def aggregate_with_rbf_and_aging(
             age_scores[k] = np.exp(-age_lambda * max(float(age), 0.0))
     age_scores = np.maximum(age_scores, eps)
 
-  
+    sim_scores = 0.5+0.5*sim_scores
     # ----- 6) Combine all three multiplicatively + renormalize -----
     combined_w = sample_w * sim_scores * age_scores
     combined_w = np.maximum(combined_w, eps)
