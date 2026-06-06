@@ -189,7 +189,7 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                  curr_agents,
                  gamma=1.0,
                  eps=1e-12,
-                 age_lambda=0.2)          
+                 age_lambda=0.5)          
         elif 'fednova' in gv.gar:
             update_sum = np.zeros_like(initial_global_weights)
             n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)

@@ -46,7 +46,7 @@ ALPHA_CD_DRIFT = ALPHA_STABLE*0.9
 ALPHA_UNSTABLE = ALPHA_STABLE*0.8
 
 # COOLDOWN_STEPS = 4
-COOLDOWN_STEPS = 6
+COOLDOWN_STEPS = 4
 WARMUP_STEPS = 2
 
 NUM_CLASSES = 4
@@ -317,6 +317,13 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
                   if(agsteps_since_drift==COOLDOWN_STEPS):
                       sess.run(lr_var.assign(LR_STABLE))              
                       sess.run(alpha_var.assign(ALPHA_STABLE))
+
+                      for c in range(NUM_CLASSES):
+                         loss_ph_per_label[c].reset()
+                         f1_ph_per_label[c].reset()
+                         loss_history_per_label[c].clear()
+                         f1_history_per_label[c].clear()
+                      
                       DRIFT_FLAG = False
                       agsteps_since_drift = 0
             
@@ -349,6 +356,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     delayedstr = delayedclient
     results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
 
+    client_seed = client_seed + 1000*round_idx + CURRENT_AGENT
     delay_rng = np.random.default_rng(client_seed)
     delay_prob = 0.3 #delay only 25% of the clients
     max_delay = 2 # max delay is three rounds

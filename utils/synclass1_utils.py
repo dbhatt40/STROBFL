@@ -13,6 +13,7 @@ from collections import deque
 
 import tensorflow as tf
 import math
+import re
 
 
 
@@ -651,6 +652,21 @@ def aggregate_with_rbf_and_aging(
                k for k, v in return_dict.items()
                if k.endswith("_round_arrived") and v == round_idx                          
               ]
+    latest_updates = {}
+
+    for key in arrived_updates:
+      m = re.match(r"(\d+)_r(\d+)_round_arrived", key)
+      if m is None:
+        continue
+
+      cid = int(m.group(1))
+      created_round = int(m.group(2))
+
+      if (cid not in latest_updates or
+        created_round > latest_updates[cid][0]):
+        latest_updates[cid] = (created_round, key)
+
+    arrived_updates = [v[1] for v in latest_updates.values()]
 
     for arrival_key in arrived_updates:                     
            prefix = arrival_key.replace("_round_arrived", "")           
@@ -673,7 +689,7 @@ def aggregate_with_rbf_and_aging(
  
     for k, update in enumerate(client_updates):
        flat = _flatten_weights(update)
-       flat = flat / (np.linalg.norm(flat) + 1e-12)
+    #   flat = flat / (np.linalg.norm(flat) + 1e-12)
        print(
           f"Client {k}: "
           f"shape={flat.shape}, "
@@ -701,7 +717,7 @@ def aggregate_with_rbf_and_aging(
         if med <= eps:
           gamma_eff = gamma 
         else:
-          gamma_eff = 1/ med
+          gamma_eff = 0.1/ med
 
          # degenerate case K=1
     sim_matrix = np.exp(-gamma_eff * sq_dists)   
@@ -735,7 +751,7 @@ def aggregate_with_rbf_and_aging(
             age_scores[k] = np.exp(-age_lambda * max(float(age), 0.0))
     age_scores = np.maximum(age_scores, eps)
 
-    sim_scores = 0.2+0.8*sim_scores
+  #  sim_scores = 0.2+0.8*sim_scores
     # ----- 6) Combine all three multiplicatively + renormalize -----
     combined_w = sample_w * sim_scores * age_scores
     combined_w = np.maximum(combined_w, eps)
