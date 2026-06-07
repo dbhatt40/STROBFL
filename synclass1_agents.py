@@ -375,7 +375,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_weights"] = np.array(local_delta)
     return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_num_samples"] = batch_size
-    return_dict[str(CURRENT_AGENT) + "_lrsum"] = LR_SUM
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_lrsum"] = LR_SUM
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_created"] = round_idx
     return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_arrived"] = round_idx + delay
     print(
