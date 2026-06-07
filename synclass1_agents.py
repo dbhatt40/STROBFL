@@ -307,20 +307,20 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
           agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
           sess.run(reset_accum_op)
           if ((DRIFT_FLAG==False) or ((DRIFT_FLAG==True) and (agsteps_since_drift>=COOLDOWN_STEPS))):
-                 print(f"------Drift Flag{DRIFT_FLAG}, steps since drift {agsteps_since_drift}")
+                 #print(f"------Drift Flag{DRIFT_FLAG}, steps since drift {agsteps_since_drift}")
                  
                  DRIFT_FLAG = detect_drift(agg, eps, NUM_CLASSES, MIN_LABEL_CT,stability, loss_ph_per_label,f1_ph_per_label,
                                        loss_history_per_label,f1_history_per_label,agent_drift, reset_ema_op,sess, lr_var, alpha_var, CURRENT_AGENT)
                   
                  if(DRIFT_FLAG==True):
                     agsteps_since_drift = 0
-                    print(f"---DRIFT DETECTED---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
+                    #print(f"---DRIFT DETECTED---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
 
           elif (DRIFT_FLAG==True) and (agsteps_since_drift<COOLDOWN_STEPS):
                   agsteps_since_drift += 1
-                  print(f"---IN COOLDOWN---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
+                  #print(f"---IN COOLDOWN---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
                   if(agsteps_since_drift==COOLDOWN_STEPS):
-                      print(f"---FINISHED COOLDOWN---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
+                      #print(f"---FINISHED COOLDOWN---Drift Flag{DRIFT_FLAG}, round{round_idx}, client{CURRENT_AGENT}")
                       sess.run(lr_var.assign(LR_STABLE))              
                       sess.run(alpha_var.assign(ALPHA_STABLE))
 
