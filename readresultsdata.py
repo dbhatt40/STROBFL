@@ -14,9 +14,9 @@ from glob import glob
 files = []
 
 
-files  += glob("./results/SS.txt")
-# files  += glob("./results/AS.txt")
-files  += glob("./results/FPS-100.txt")
+files  += glob("./results/SS-0.txt")
+files  += glob("./results/FA-0.txt")
+files  += glob("./results/SA-0.txt")
 # files  += glob("./results/SA.txt")
 # files  += glob("./results/SVS.txt")
 
@@ -25,7 +25,7 @@ for f in files:
     print(f)
 
 dfs = []
-methods = ['STRAP-FL','FedProx']
+methods = ['STRAP-FL','FedProx','SVRG']
 
 values = []
 
@@ -36,7 +36,7 @@ for f in files:
     # print(f"{f} -> min: {col.min()}, max: {col.max()}")
     # values.append(col.mean()) 
     # print(values)
-    df["eval_success"] *= 100
+   # df["eval_success"] *= 100
     # extract directory names for labeling
     level1 = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
     level2 = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f))))
@@ -61,33 +61,118 @@ print(means_per_df)
 all_df = pd.concat(dfs, ignore_index=True)
 print(all_df.head())
 
-
+colors = {
+    "STRAP-FL": "#006400",  # dark green
+    "FedProx": "#8B0000",   # dark red
+    "SVRG": "#000080"       # navy
+}
 
 sns.set(style="whitegrid")
 
 plt.figure(figsize=(10, 6))
+
 ax = sns.lineplot(
     data=all_df,
     x="t",
-    y="eval_success",
+    y="eval_success",   
     hue="level4",      # method
     style="level4",    # run
-    markers=True
+    markers=True,
+    palette=colors,
+    linewidth=2.8,
+    markersize=3
 )
 
-# ax.legend(
-#     title="Method",
-#     labelspacing=1.2,   # vertical space between entries
-#     handlelength=3.0,   # length of line/marker handle
-#     handletextpad=1.2,  # space between handle and text
-#     borderpad=1.2       # padding inside legend box
+ax.legend(
+    title="Method",
+    frameon=True,
+    fontsize=16,
+    labelspacing=1.2,   # vertical space between entries
+    handlelength=3.0,   # length of line/marker handle
+    handletextpad=1.2,  # space between handle and text
+    borderpad=1.2       # padding inside legend box
+)
+
+# ax.axvspan(
+#     2, 6,
+#     alpha=0.6,
+#     color="lightgray",
+#     label="Incremental Drift Area"
 # )
 
 # ax.axvspan(
-#     8, 20,
-#     alpha=0.15,
-#     color="red",
-#     label="Drift Area 1"
+#     6, 9,
+#     alpha=0.6,
+#     color="lightpink",
+#     label="Gradual Drift Area"
+# )
+# ax.axvspan(
+#     9, 13,
+#     alpha=0.6,
+#     color="lightgray",
+    
+# )
+# ax.axvspan(
+#     13, 16,
+#     alpha=0.6,
+#     color="lightpink",
+
+# )
+# ax.axvspan(
+#     16, 20,
+#     alpha=0.4,
+#     color="lightgray",
+    
+# )
+# ax.axvspan(
+#     20, 23,
+#     alpha=0.6,
+#     color="lightpink",
+
+# )
+# ax.axvspan(
+#     23, 27,
+#     alpha=0.4,
+#     color="lightgray",
+    
+# )
+# ax.axvspan(
+#     27, 30,
+#     alpha=0.6,
+#     color="lightpink",
+
+# )
+
+# ax.axvspan(
+#     30, 34,
+#     alpha=0.4,
+#     color="lightgray",
+    
+# )
+# ax.axvspan(
+#     34, 37,
+#     alpha=0.6,
+#     color="lightpink",
+
+# )
+
+# ax.axvspan(
+#     37, 41,
+#     alpha=0.4,
+#     color="lightgray",
+    
+# )
+# ax.axvspan(
+#     41, 44,
+#     alpha=0.6,
+#     color="lightpink",
+
+# )
+# ax.axvspan(
+#     44, 50,
+#     alpha=0.4,
+#     color="lightgray",
+   
 # )
 
 # ax.axvspan(

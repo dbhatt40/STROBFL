@@ -525,7 +525,7 @@ def federated_mixed_drift_stream_with_queues(
 
     for r in range(num_rounds):
         a_rng = np.random.default_rng(random_state)
-        arrival_rate = a_rng.uniform(0.25,1.00)
+        arrival_rate = a_rng.uniform(0.85,1.00)
         arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
         client_batches = []
 

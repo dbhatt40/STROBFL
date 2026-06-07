@@ -302,7 +302,7 @@ def synclass1_agent(current_agent, x_batch, y_batch, round_idx, gpu_id, return_d
 
       agg_k += 1
       if (agg_k % AGG_STEPS == 0) and (step >= WARMUP_STEPS) :
-          print(f"-------------------------------Into DRIFT SETUP rounc{round_idx}")
+          #print(f"-------------------------------Into DRIFT SETUP rounc{round_idx}")
 
           agg = sess.run(read_agg)          # agg["loss"], agg["loss_per_label"], agg["f1_per_label"], agg["f1_macro"], agg["label_counts"]
           sess.run(reset_accum_op)

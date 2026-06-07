@@ -191,19 +191,45 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                  eps=1e-12,
                  age_lambda=0.5)          
         elif 'fednova' in gv.gar:
-            update_sum = np.zeros_like(initial_global_weights)
-            n_total = sum(return_dict[str(cid) + "_num_samples"] for cid in curr_agents)
-            for j in range(num_agents_per_time):
-                cid = curr_agents[j]  
-                p_i = return_dict[str(cid) + "_num_samples"]/n_total
-                client_weights = return_dict[str(cid)]        
-                delta_i = client_weights        
-                a_i = return_dict[str(cid) + "_lrsum"]    
-                normalized_update = delta_i / (a_i + 1e-12)        
-                update_sum += p_i * normalized_update
+            arrived_updates = [
+                 k for k, v in return_dict.items()
+                 if k.endswith("_round_arrived") and v == round_idx
+                 ]
 
-            global_weights = initial_global_weights + update_sum
-              
+            current_updates = []
+
+            for arrival_key in arrived_updates:
+                  prefix = arrival_key.replace("_round_arrived", "")
+
+                  created_round = return_dict[f"{prefix}_round_created"]
+                  arrived_round = return_dict[f"{prefix}_round_arrived"]
+
+                  if created_round == round_idx and arrived_round == round_idx:
+                        current_updates.append(arrival_key)
+
+            total_samples = 0
+            agg_delta = [np.zeros_like(w) for w in global_weights]
+
+            for arrival_key in current_updates:
+                 prefix = arrival_key.replace("_round_arrived", "")
+
+                 update = return_dict[f"{prefix}_weights"]      # local_delta
+                 num_samples = return_dict[f"{prefix}_num_samples"]
+
+                 total_samples += num_samples
+                 lr_sum = return_dict[f"{prefix}_lrsum"]
+                 for layer_idx in range(len(global_weights)):
+                       agg_delta[layer_idx] += num_samples * update[layer_idx]/(lr_sum+1e-12)
+
+                 print(f"FedAvg no-delay aggregating {arrival_key}")
+
+            if total_samples > 0:
+               for layer_idx in range(len(global_weights)):
+                     global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
+            else:
+               print(f"No no-delay FedAvg updates at round {round_idx}") 
+               
+            
         end = time.perf_counter()
         print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
         print(f"Elapsed time: {end - start:.6f} seconds")
