@@ -75,15 +75,15 @@ def dir_name_fn(args):
 def init():
     # Reading in arguments for the run
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default='uci-sensor',
+    parser.add_argument("--dataset", default='synthetic-class1',
                         help="dataset to be used")
     parser.add_argument("--optimizer", default='adam',
                         help="optimizer to be used")
-    parser.add_argument("--k", type=int, default=4, help="number of agents")
-    parser.add_argument("--C", type=float, default=0.5,
+    parser.add_argument("--k", type=int, default=20, help="number of agents")
+    parser.add_argument("--C", type=float, default=0.8,
                         help="fraction of agents per time step")
-    parser.add_argument("--T", type=int, default=40, help="max time_steps")
-    parser.add_argument("--B", type=int, default=25, help="agent batch size")
+    parser.add_argument("--T", type=int, default=50, help="max time_steps")
+    parser.add_argument("--B", type=int, default=10, help="agent batch size")
     parser.add_argument("--gar", type=str, default='avg', help="server aggregation rule")
     
     parser.add_argument("--ndrift", type=int, default=0, help="number drifted clients")
@@ -176,13 +176,14 @@ def init():
     dmode = 'Shared'
     arate = 1.0
     ifactor = 0.3
+    B=10
     optimizer = 'adam'
     ndrift = args.ndrift
     dmode = args.dmode
-    arate = args.arate
+  #  arate = args.arate
     ifactor = args.ifactor
     optimizer = args.optimizer
-    B = args.B
+ #   B = args.B
 
     global max_acc
 
@@ -198,7 +199,7 @@ def init():
     elif args.dataset == 'synthetic-class1':     
        DATA_DIM = 2
        NUM_CLASSES = 4
-       WINDOW_SIZE = 500
+       WINDOW_SIZE =1000
        NUM_DRIFTED = 0
        max_acc = 85.0
        max_agents_per_gpu = 2

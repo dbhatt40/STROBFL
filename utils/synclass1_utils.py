@@ -421,12 +421,13 @@ def federated_mixed_drift_stream_with_queues(
     assert 0 <= num_drifted_clients <= num_clients, "num_drifted_clients must be between 0 and num_clients"
 
     rng = np.random.default_rng(random_state)
+    #arrival_rate = rng.uniform(0.25,1.00)
 
     if queue_maxlen is None:
         queue_maxlen = batch_size
     queues = [[] for _ in range(int(num_clients))]
 
-    arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
+    #arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
     use_policy = arrival_rate > 1.0
 
     # Decide which client IDs are drifted.
@@ -523,6 +524,9 @@ def federated_mixed_drift_stream_with_queues(
  #-------------------------
 
     for r in range(num_rounds):
+        a_rng = np.random.default_rng(random_state)
+        arrival_rate = a_rng.uniform(0.25,1.00)
+        arrivals_per_round = max(0, int(round(arrival_rate * batch_size)))
         client_batches = []
 
         for cid in range(num_clients):
@@ -654,7 +658,7 @@ def aggregate_with_rbf_and_aging(
               ]
     latest_updates = {}
 
-    for key in arrived_updates:
+    for key in arrived_updates: #remove older updates for same client if fresh is available
       m = re.match(r"(\d+)_r(\d+)_round_arrived", key)
       if m is None:
         continue
