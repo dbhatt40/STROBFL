@@ -39,111 +39,141 @@ def get_round_slice(X, y, t, T):
     return X[s:e], y[s:e]
 
 
-def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_dict):
-	# Start the training process
-	num_agents_per_time = int(gv.C * gv.k)
-	simul_agents = gv.num_gpus * gv.max_agents_per_gpu
-	simul_num = min(num_agents_per_time, simul_agents)
-	agent_indices = np.arange(gv.k)
+def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_dict, master_rng):
+    # Start the training process
+    num_agents_per_time = int(gv.C * gv.k)
+    simul_agents = gv.num_gpus * gv.max_agents_per_gpu
+    simul_num = min(num_agents_per_time, simul_agents)
+    agent_indices = np.arange(gv.k)
 
 
-	t = 0
-	eval_loss_list = []
-	lr = 0.1
-	param_dict = dict()
-	param_dict['offset'] = [0]
-	param_dict['shape'] = []
+    t = 0
+    eval_loss_list = []
+    lr = 0.1
+    param_dict = dict()
+    param_dict['offset'] = [0]
+    param_dict['shape'] = []
 
-	r = [1 for i in range(0,gv.k)]
-	
-	NUM_AGENTS_ROUND = gv.k
-	train_offsets = np.zeros(NUM_AGENTS_ROUND, dtype=np.int32)
-		 
-	while t < gv.T:
-		
-		print('-----------------Training client in server round %s----------------' % t)
-	
-
-		lmbda = gv.C*(1-gv.C)
-		probs = [gv.C + lmbda*ri for ri in r]
-		probs_sum = sum(probs)
-		probs = [elem/probs_sum for elem in probs]
-
-		process_list = []
-		curr_agents = np.random.choice(agent_indices, num_agents_per_time,
-									   replace=False,p=probs)
-		print('Set of agents chosen in this round: %s' % curr_agents)
-		
-	       
-		k = 0
-		agents_left = 1e4
-
-		while k < num_agents_per_time:
-			true_simul = min(simul_num, agents_left)
-			print('Training %s agents' % true_simul)
-			for l in range(true_simul):
-				gpu_index = int(l / gv.max_agents_per_gpu)
-				gpu_id = gv.gpu_ids[gpu_index]
-				i = curr_agents[k]
-				X_batch, Y_batch = X_Y_train_shards[i]  
-                
-				X_round, Y_round = get_round_slice(X_batch, Y_batch, t, gv.T)   
-                
-				print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
-				if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
-				  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
-				elif('strsaga' in gv.optimizer):
-  				  p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
-				elif('svrg' in gv.optimizer):
- 				  p = Process(target=aq_agent_svrg, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
-				elif('fedprox' in gv.optimizer):
- 				  p = Process(target=aq_agent_fedprox, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))             
-				p.start()
-				process_list.append(p)
-				k += 1	
-				 
-			for item in process_list:
-				item.join()
-			agents_left = num_agents_per_time - k
-			print('Agents left:%s' % agents_left)
-
-		print('Joined all processes for time step %s' % t)
-
-		global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
+    r = [1 for i in range(0,gv.k)]
+    
+    NUM_AGENTS_ROUND = gv.k
+    train_offsets = np.zeros(NUM_AGENTS_ROUND, dtype=np.int32)
+         
+    while t < gv.T:
         
+        print('-----------------Training client in server round %s----------------' % t)
+    
+        round_idx = t
+        lmbda = gv.C*(1-gv.C)
+        probs = [gv.C + lmbda*ri for ri in r]
+        probs_sum = sum(probs)
+        probs = [elem/probs_sum for elem in probs]
 
-		if 'avg' in gv.gar:
- 			print('Using standard mean aggregation')		            
- 			for k in range(num_agents_per_time):
- 				 global_weights += (1/num_agents_per_time) * return_dict[str(curr_agents[k])]
-		elif 'strobfl' in gv.gar:
- 			client_num_samples = np.array(
-                    [return_dict[f"{cid}_num_samples"] for cid in curr_agents],
-                    dtype=np.float64,
-                  )
- 			global_weights = aggregate_with_rbf_and_aging(
+        process_list = []
+        curr_agents = np.random.choice(agent_indices, num_agents_per_time,
+                                       replace=False,p=probs)
+        print('Set of agents chosen in this round: %s' % curr_agents)
+        
+        client_seed = int(master_rng.integers(1_000_000_000))
+        k = 0
+        agents_left = 1e4
+
+        while k < num_agents_per_time:
+            true_simul = min(simul_num, agents_left)
+            print('Training %s agents' % true_simul)
+            for l in range(true_simul):
+                gpu_index = int(l / gv.max_agents_per_gpu)
+                gpu_id = gv.gpu_ids[gpu_index]
+                i = curr_agents[k]
+                X_batch, Y_batch = X_Y_train_shards[i]  
+                
+                X_round, Y_round = get_round_slice(X_batch, Y_batch, t, gv.T)   
+                
+                print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
+                if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
+                  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+                elif('strsaga' in gv.optimizer):
+                    p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+                elif('svrg' in gv.optimizer):
+                   p = Process(target=aq_agent_svrg, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
+                elif('fedprox' in gv.optimizer):
+                   p = Process(target=aq_agent_fedprox, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))             
+                p.start()
+                process_list.append(p)
+                k += 1    
+                 
+            for item in process_list:
+                item.join()
+            agents_left = num_agents_per_time - k
+            print('Agents left:%s' % agents_left)
+
+        print('Joined all processes for time step %s' % t)
+
+        global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
+        
+#-------------------------------------Aggregation
+        if 'avg' in gv.gar:
+          arrived_updates = [
+          k for k, v in return_dict.items()
+             if k.endswith("_round_arrived") and v == round_idx
+            ]
+          current_updates = []
+
+          for arrival_key in arrived_updates:
+                  prefix = arrival_key.replace("_round_arrived", "")
+
+                  created_round = return_dict[f"{prefix}_round_created"]
+                  arrived_round = return_dict[f"{prefix}_round_arrived"]
+
+                  if created_round == round_idx and arrived_round == round_idx:
+                        current_updates.append(arrival_key)
+          total_samples = 0
+          agg_delta = [np.zeros_like(w) for w in global_weights]
+
+          for arrival_key in current_updates:
+                 prefix = arrival_key.replace("_round_arrived", "")
+
+                 update = return_dict[f"{prefix}_weights"]      # local_delta
+                 num_samples = return_dict[f"{prefix}_num_samples"]
+
+                 total_samples += num_samples
+
+                 for layer_idx in range(len(global_weights)):
+                       agg_delta[layer_idx] += num_samples * update[layer_idx]
+
+                 print(f"FedAvg no-delay aggregating {arrival_key}")
+
+          if total_samples > 0:
+               for layer_idx in range(len(global_weights)):
+                     global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
+          else:
+               print(f"No no-delay FedAvg updates at round {round_idx}")
+               
+        elif 'strobfl' in gv.gar:
+              global_weights= aggregate_with_rbf_and_aging(
+                 round_idx,
                  global_weights,
                  num_agents_per_time,
-                 return_dict,
+                 return_dict,                 
                  curr_agents,
-                 client_num_samples,
                  gamma=1.0,
                  eps=1e-12,
-                 age_lambda=1.0)              
-		# Saving for the next update
-		np.save(gv.dir_name + 'global_weights_t%s.npy' %
-				(t + 1), global_weights)
+                 age_lambda=0.5)    
 
-		# Evaluate global weight
-		p_eval = Process(target=eval_func, args=(
-				X_test, Y_test, t + 1, return_dict, y_scaler), kwargs={'global_weights': global_weights})
-		p_eval.start()
-		p_eval.join()		
+        # Saving for the next update
+        np.save(gv.dir_name + 'global_weights_t%s.npy' %
+                (t + 1), global_weights)
 
-		eval_loss_list.append(return_dict['eval_loss'])
- 	
-		file_write_resultsdata(results_dict)
+        # Evaluate global weight
+        p_eval = Process(target=eval_func, args=(
+                X_test, Y_test, t + 1, return_dict, y_scaler), kwargs={'global_weights': global_weights})
+        p_eval.start()
+        p_eval.join()        
 
-		t += 1
+        eval_loss_list.append(return_dict['eval_loss'])
+     
+        file_write_resultsdata(results_dict)
 
-	return t
+        t += 1
+
+    return t

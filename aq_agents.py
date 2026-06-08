@@ -92,7 +92,7 @@ def detect_drift(
  
     return drift_flag
 
-def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler):
+def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed):
     CURRENT_AGENT = i
     round_idx = t
     tf.reset_default_graph()
@@ -153,8 +153,7 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
     DRIFT_FLAG = False
     
 #---------------------------------------------training
-
-
+    LR_SUM=0
 
     num_steps = 0
    	
@@ -215,18 +214,28 @@ def aq_agent(i, x_batch, y_batch, t, gpu_id, return_dict, results_dict, X_test, 
     driftstr = "-".join(agent_drift)
     delayedstr = delayedclient
     results_dict[client_str] = {"t": round_idx, "i": CURRENT_AGENT, "eval_success": eval_success, "eval_loss": eval_loss, "drift": driftstr, "delayed":delayedstr}  
-    # print("Results dict:", results_dict[client_str])
-    # print("Number of results_dict items - client:", len(results_dict))
+    
+    
+    client_seed = client_seed + 1000*round_idx + CURRENT_AGENT
+    delay_rng = np.random.default_rng(client_seed)
+    delay_prob = 0.3 #delay only 25% of the clients
+    max_delay = 2 # max delay is three rounds
+    delay = 0
+    if delay_rng.random() < delay_prob:
+      delay = delay_rng.integers(1, max_delay + 1)
+
  	
-    # print("Results dict:", results_dict[client_str])
-    # print("Number of results_dict items - client:", len(results_dict))
- 	
- 	
-    print('Agent {}: success {}, loss {}'.format(i, eval_success, eval_loss))#  
-    return_dict[str(i)] = np.array(local_delta)
-    return_dict["theta{}".format(i)] = np.array(local_weights)
-    return_dict[str(CURRENT_AGENT) + "_num_samples"] = batch_size
-    return_dict[str(CURRENT_AGENT) + "_time"] = time.time()
+    print('Agent {}: success {}, loss {}'.format(CURRENT_AGENT, eval_success, eval_loss))#  
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_weights"] = np.array(local_delta)
+    return_dict["theta{}".format(CURRENT_AGENT)] = np.array(local_weights)
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_num_samples"] = batch_size
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_lrsum"] = LR_SUM
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_created"] = round_idx
+    return_dict[f"{CURRENT_AGENT}_r{round_idx}_round_arrived"] = round_idx + delay
+    print(
+      f"Added a delay for {CURRENT_AGENT} at round {round_idx} "
+      f"to round_arrived {round_idx + delay}, delay={delay}"
+    )
 
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (i, t), local_delta)
 

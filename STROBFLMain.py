@@ -146,7 +146,7 @@ def main(args):
             _ = synclass1_train_fn(return_dict, results_dict, master_rng)
     elif (args.dataset == 'air-quality'):
             X_Y_train_shards, X_test, Y_test, y_scaler = data_air_quality()
-            _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, y_scaler, return_dict, results_dict)
+            _ = aq_train_fn( X_Y_train_shards, X_test, Y_test, y_scaler, return_dict, results_dict,master_rng))
 
          			
 

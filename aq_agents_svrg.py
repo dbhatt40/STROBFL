@@ -32,7 +32,7 @@ import time
 from utils.svrg_utils import svrg_client_learn_tf1_regression
 
 
-def aq_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test,y_scaler):
+def aq_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test,y_scaler, client_seed):
     tf.keras.backend.set_learning_phase(1)
     print('Agent %s on GPU %s' % (current_agent,gpu_id))
     # set environment
@@ -76,7 +76,7 @@ def aq_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dic
     num_steps = int(batch_size/train_batchsize)
     
     print("Num training steps: {}".format(num_steps))
-
+    LR_SUM=0
     data_dim = gv.DATA_DIM
     num_classes = gv.NUM_CLASSES
     for step in range(num_steps):
@@ -140,12 +140,25 @@ def aq_agent_svrg(current_agent, x_batch, y_batch, round_idx, gpu_id, return_dic
     # print("Number of results_dict items - client:", len(results_dict))
  	
  	
-    print('Agent {}: success {}, loss {}'.format(current_agent, eval_success, eval_loss))#  
-    return_dict[str(current_agent)] = np.array(local_delta)
-    return_dict["theta{}".format(current_agent)] = np.array(local_weights)
-    return_dict[str(current_agent) + "_num_samples"] = batch_size
-    return_dict[str(current_agent) + "_time"] = time.time()
+    client_seed = client_seed + 1000*round_idx + current_agent
+    delay_rng = np.random.default_rng(client_seed)
+    delay_prob = 0.3 #delay only 25% of the clients
+    max_delay = 2 # max delay is three rounds
+    delay = 0
+    if delay_rng.random() < delay_prob:
+      delay = delay_rng.integers(1, max_delay + 1)
 
+    print('Agent {}: success {}, loss {}'.format(current_agent, eval_success, eval_loss))#  
+    return_dict[f"{current_agent}_r{round_idx}_weights"] = np.array(local_delta)
+    return_dict["theta{}".format(current_agent)] = np.array(local_weights)
+    return_dict[f"{current_agent}_r{round_idx}_num_samples"] = batch_size
+    return_dict[f"{current_agent}_r{round_idx}_lrsum"] = LR_SUM
+    return_dict[f"{current_agent}_r{round_idx}_round_created"] = round_idx
+    return_dict[f"{current_agent}_r{round_idx}_round_arrived"] = round_idx + delay
+    print(
+      f"Added a delay for {current_agent} at round {round_idx} "
+      f"to round_arrived {round_idx + delay}, delay={delay}"
+    )
     np.save(gv.dir_name + 'ben_delta_%s_t%s.npy' % (current_agent, round_idx), local_delta)
 
     return

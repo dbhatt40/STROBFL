@@ -141,6 +141,7 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
         print('Joined all processes for time step %s' % round_idx)
 
         global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
+        
         if 'avg' in gv.gar:
             arrived_updates = [
                  k for k, v in return_dict.items()
@@ -221,13 +222,13 @@ def synclass1_train_fn(return_dict, results_dict, master_rng):
                  for layer_idx in range(len(global_weights)):
                        agg_delta[layer_idx] += num_samples * update[layer_idx]/(lr_sum+1e-12)
 
-                 print(f"FedAvg no-delay aggregating {arrival_key}")
+                 print(f"FedNova no-delay aggregating {arrival_key}")
 
             if total_samples > 0:
                for layer_idx in range(len(global_weights)):
                      global_weights[layer_idx] += agg_delta[layer_idx] / total_samples
             else:
-               print(f"No no-delay FedAvg updates at round {round_idx}") 
+               print(f"FedNova - no samples at round {round_idx}") 
                
             
         end = time.perf_counter()
