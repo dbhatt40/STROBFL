@@ -58,12 +58,13 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
     
     NUM_AGENTS_ROUND = gv.k
     train_offsets = np.zeros(NUM_AGENTS_ROUND, dtype=np.int32)
+    round_idx = 0
          
-    while t < gv.T:
+    while round_idx < gv.T:
         
-        print('-----------------Training client in server round %s----------------' % t)
+        print('-----------------Training client in server round %s----------------' % round_idx)
     
-        round_idx = t
+
         lmbda = gv.C*(1-gv.C)
         probs = [gv.C + lmbda*ri for ri in r]
         probs_sum = sum(probs)
@@ -84,20 +85,20 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
             for l in range(true_simul):
                 gpu_index = int(l / gv.max_agents_per_gpu)
                 gpu_id = gv.gpu_ids[gpu_index]
-                i = curr_agents[k]
-                X_batch, Y_batch = X_Y_train_shards[i]  
+                current_agent = curr_agents[k]
+                X_batch, Y_batch = X_Y_train_shards[current_agent]  
                 
-                X_round, Y_round = get_round_slice(X_batch, Y_batch, t, gv.T)   
+                X_round, Y_round = get_round_slice(X_batch, Y_batch, round_idx, gv.T)   
                 
                 print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
                 if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
-                  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
+                  p = Process(target=aq_agent, args=(current_agent, X_round, Y_round, round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
                 elif('strsaga' in gv.optimizer):
-                    p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+                    p = Process(target=aq_agent_strsaga, args=(current_agent, X_round, Y_round,  round_idx, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
                 elif('svrg' in gv.optimizer):
-                   p = Process(target=aq_agent_svrg, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
+                   p = Process(target=aq_agent_svrg, args=(current_agent, X_round, Y_round, round_idx,  gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
                 elif('fedprox' in gv.optimizer):
-                   p = Process(target=aq_agent_fedprox, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))             
+                   p = Process(target=aq_agent_fedprox, args=(current_agent, X_round, Y_round,  round_idx,  gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))             
                 p.start()
                 process_list.append(p)
                 k += 1    
@@ -107,9 +108,9 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
             agents_left = num_agents_per_time - k
             print('Agents left:%s' % agents_left)
 
-        print('Joined all processes for time step %s' % t)
+        print('Joined all processes for time step %s' % round_idx)
 
-        global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % t, allow_pickle=True)
+        global_weights = np.load(gv.dir_name + 'global_weights_t%s.npy' % round_idx, allow_pickle=True)
         
 #-------------------------------------Aggregation
         if 'avg' in gv.gar:
@@ -162,11 +163,11 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
 
         # Saving for the next update
         np.save(gv.dir_name + 'global_weights_t%s.npy' %
-                (t + 1), global_weights)
+                (round_idx + 1), global_weights)
 
         # Evaluate global weight
         p_eval = Process(target=eval_func, args=(
-                X_test, Y_test, t + 1, return_dict, y_scaler), kwargs={'global_weights': global_weights})
+                X_test, Y_test, round_idx + 1, return_dict, y_scaler), kwargs={'global_weights': global_weights})
         p_eval.start()
         p_eval.join()        
 
@@ -174,6 +175,6 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
      
         file_write_resultsdata(results_dict)
 
-        t += 1
+        round_idx += 1
 
-    return t
+    return round_idx
