@@ -91,7 +91,7 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
                 
                 print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
                 if(('adam' in gv.optimizer) or ('strobfl_learn' in gv.optimizer)):
-                  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
+                  p = Process(target=aq_agent, args=(i, X_round, Y_round,  t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler, client_seed))
                 elif('strsaga' in gv.optimizer):
                     p = Process(target=aq_agent_strsaga, args=(i, X_round, Y_round, t, gpu_id, return_dict, results_dict, X_test, Y_test, y_scaler))
                 elif('svrg' in gv.optimizer):
