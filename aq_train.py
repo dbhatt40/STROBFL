@@ -86,8 +86,9 @@ def aq_train_fn(X_Y_train_shards, X_test, Y_test, y_scaler,return_dict, results_
                 gpu_index = int(l / gv.max_agents_per_gpu)
                 gpu_id = gv.gpu_ids[gpu_index]
                 current_agent = curr_agents[k]
+                print(f"Current agent that is executing is {current_agent}")
                 X_batch, Y_batch = X_Y_train_shards[current_agent]  
-                
+                print(f"Got batch of data sizes-{X_batch.len}, {Y_batch.len}")
                 X_round, Y_round = get_round_slice(X_batch, Y_batch, round_idx, gv.T)   
                 
                 print("Size of train X_batch, Y_batch:", X_round.shape, Y_round.shape)
